@@ -2,7 +2,10 @@ import React, { useState } from 'react'
 import { Lock } from 'lucide-react'
 import axios from 'axios'
 
+const API_BASE = import.meta.env.VITE_API_URL || ''
+
 const Login = ({ onLogin }) => {
+  const [slug, setSlug] = useState(localStorage.getItem('tenant_slug') || '')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -14,7 +17,18 @@ const Login = ({ onLogin }) => {
     setLoading(true)
 
     try {
-      const res = await axios.post('/api/admin/login', { username, password })
+      const res = await axios.post(`${API_BASE}/api/auth/login`, {
+        slug: slug.trim() || undefined,
+        username: username.trim(),
+        password
+      })
+
+      // Guardar token y datos del tenant
+      localStorage.setItem('tenant_slug', slug.trim())
+      if (res.data.tenant) {
+        localStorage.setItem('tenant_data', JSON.stringify(res.data.tenant))
+      }
+
       onLogin(res.data.token)
     } catch (err) {
       setError(err.response?.data?.error || 'Error de conexión')
@@ -32,6 +46,18 @@ const Login = ({ onLogin }) => {
           <p className="text-muted">Panel de Administración</p>
         </div>
         <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label">Negocio</label>
+            <input
+              type="text"
+              className="form-input"
+              value={slug}
+              onChange={e => setSlug(e.target.value.toLowerCase())}
+              placeholder="ej: panem"
+              autoComplete="organization"
+            />
+            <span className="text-muted" style={{ fontSize: '0.75rem' }}>Dejar vacío para Super Admin</span>
+          </div>
           <div className="form-group">
             <label className="form-label">Usuario</label>
             <input
@@ -56,7 +82,7 @@ const Login = ({ onLogin }) => {
               autoComplete="current-password"
             />
           </div>
-          {error && <p className="text-danger mb-4" style={{ fontSize: '0.85rem' }}>{error}</p>}
+          {error && <p className="text-danger mb-4" style={{ fontSize: '0.85rem', color: 'var(--danger, #ef4444)' }}>{error}</p>}
           <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} disabled={loading}>
             {loading ? 'Ingresando...' : 'Ingresar'}
           </button>

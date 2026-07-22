@@ -10,7 +10,8 @@ const Benefits = () => {
     const [error, setError] = useState('');
 
     useEffect(() => {
-        axios.get(`/api/customers/${customerId}/benefits`)
+        const apiBase = import.meta.env.VITE_API_URL || '';
+        axios.get(`${apiBase}/api/customers/${customerId}/benefits`)
             .then(res => {
                 setData(res.data);
                 setLoading(false);

@@ -248,13 +248,13 @@ async function printViaSerial(ticketData) {
 
 /**
  * Impresión vía red (IP directa al puerto raw de la impresora)
- * Soporta múltiples impresoras — envía a todas las configuradas
+ * Usa el Print Bridge local para enviar comandos TCP a las impresoras.
+ * El Print Bridge corre en una PC dentro de la red del local (puerto 3001).
  */
 async function printViaNetwork(ticketData, config, printerIndex) {
     const printers = config.printers || [];
     
     if (printers.length === 0) {
-        // Fallback: usar networkIp viejo si existe
         if (config.networkIp) {
             printers.push({ ip: config.networkIp, port: config.networkPort || 9100 });
         } else {
@@ -264,14 +264,22 @@ async function printViaNetwork(ticketData, config, printerIndex) {
         }
     }
 
-    // Si se especifica un índice, imprimir solo en esa impresora (para test)
+    // Print Bridge URL — se configura en localStorage
+    const bridgeUrl = config.printBridgeUrl || localStorage.getItem('print_bridge_url') || '';
+    
+    if (!bridgeUrl) {
+        alert('Configura la URL del Print Bridge (ej: http://192.168.0.248:3001) en la sección de impresoras.');
+        printViaBrowser(ticketData);
+        return;
+    }
+
     const targetPrinters = printerIndex !== undefined ? [printers[printerIndex]] : printers;
     const escposData = generateESCPOS(ticketData);
 
     const results = await Promise.allSettled(
         targetPrinters.map(async (printer) => {
             if (!printer || !printer.ip) return;
-            const response = await fetch('/api/print', {
+            const response = await fetch(`${bridgeUrl.replace(/\/$/, '')}/print`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -280,18 +288,19 @@ async function printViaNetwork(ticketData, config, printerIndex) {
                     data: escposData
                 })
             });
-            if (!response.ok) throw new Error(`Error imprimiendo en ${printer.name || printer.ip}`);
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `Error imprimiendo en ${printer.name || printer.ip}`);
+            }
         })
     );
 
     const failures = results.filter(r => r.status === 'rejected');
     if (failures.length > 0 && failures.length === targetPrinters.length) {
-        // Todas fallaron — fallback a browser
         console.error('Todas las impresoras de red fallaron:', failures);
         alert('Error en todas las impresoras de red. Usando impresión del navegador como respaldo.');
         printViaBrowser(ticketData);
     } else if (failures.length > 0) {
-        // Algunas fallaron
         console.warn('Algunas impresoras fallaron:', failures);
     }
 }

@@ -103,6 +103,17 @@ const PrinterConfig = ({ onClose }) => {
 
             {config.method === 'network' && (
                 <div style={{ marginBottom: '16px' }}>
+                    <div style={{ marginBottom: '12px' }}>
+                        <label className="text-muted" style={{ display: 'block', marginBottom: '6px', fontSize: '0.8rem' }}>Print Bridge (PC del local)</label>
+                        <input
+                            type="text"
+                            value={config.printBridgeUrl || ''}
+                            onChange={e => setConfig({ ...config, printBridgeUrl: e.target.value })}
+                            placeholder="http://192.168.0.248:3001"
+                            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'var(--surface-color)', color: 'var(--text-main)', fontSize: '0.9rem' }}
+                        />
+                        <span className="text-muted" style={{ fontSize: '0.7rem' }}>IP de la PC que corre el Print Bridge (node print-bridge/index.js)</span>
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                         <label className="text-muted" style={{ fontSize: '0.85rem' }}>Impresoras de red</label>
                         <button

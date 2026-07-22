@@ -193,8 +193,8 @@ function updateWalletPass(customerId, visits, points, benefits, tierName, cycleP
     const objectId = `${ISSUER_ID}.${customerId}`;
     const url = `https://walletobjects.googleapis.com/walletobjects/v1/loyaltyObject/${objectId}`;
 
-    // URL base del portal del cliente (se configurará en producción)
-    const clientPortalUrl = process.env.CLIENT_PORTAL_URL || 'https://loyalty.panem.mx';
+    // URL base del portal del cliente
+    const clientPortalUrl = process.env.CLIENT_PORTAL_URL || 'https://loyalty-staff.vercel.app';
 
     const patchBody = {
         loyaltyPoints: {
@@ -336,7 +336,7 @@ async function createWalletPassJWT(customerId, customerName) {
         linksModuleData: {
             uris: [
                 {
-                    uri: `${process.env.CLIENT_PORTAL_URL || 'https://loyalty.panem.mx'}/benefits/${customerId}`,
+                    uri: `${process.env.CLIENT_PORTAL_URL || 'https://loyalty-staff.vercel.app'}/benefits/${customerId}`,
                     description: 'Ver mis beneficios disponibles',
                     id: 'benefits_link'
                 }

@@ -3,7 +3,7 @@ import axios from 'axios';
 import { ArrowLeft, CheckCircle, Gift, Loader2, Star, Printer } from 'lucide-react';
 import { printRedemptionTicket } from '../utils/printer';
 
-const API_URL = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api';
+const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') + '/api';
 
 const CustomerProfile = ({ customerId, onReset }) => {
     const [data, setData] = useState(null);

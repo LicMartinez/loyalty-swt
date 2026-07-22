@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Lock } from 'lucide-react'
 import axios from 'axios'
 
-const API_BASE = import.meta.env.VITE_API_URL || ''
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 const Login = ({ onLogin }) => {
   const [slug, setSlug] = useState(localStorage.getItem('tenant_slug') || '')

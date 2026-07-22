@@ -10,7 +10,7 @@ const Benefits = () => {
     const [error, setError] = useState('');
 
     useEffect(() => {
-        const apiBase = import.meta.env.VITE_API_URL || '';
+        const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
         axios.get(`${apiBase}/api/customers/${customerId}/benefits`)
             .then(res => {
                 setData(res.data);

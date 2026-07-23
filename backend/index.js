@@ -265,6 +265,31 @@ app.post('/api/checkin', async (req, res) => {
 
         if (fetchErr || !customer) throw fetchErr || new Error("Cliente no encontrado");
 
+        // Validar límite de check-ins por día
+        const { data: configLimit } = await supabase
+            .from('loyalty_config')
+            .select('max_checkins_per_day')
+            .single();
+
+        const maxPerDay = configLimit?.max_checkins_per_day ?? 1;
+
+        if (maxPerDay > 0) {
+            const today = new Date().toISOString().slice(0, 10);
+            const { count: todayCheckins } = await supabase
+                .from('checkins')
+                .select('id', { count: 'exact', head: true })
+                .eq('customer_id', customerId)
+                .gte('created_at', today);
+
+            if (todayCheckins >= maxPerDay) {
+                return res.status(429).json({
+                    error: 'Límite de visitas alcanzado por hoy',
+                    todayCheckins,
+                    maxPerDay
+                });
+            }
+        }
+
         // Guardar estado previo para rollback
         prevState = {
             visits_count: customer.visits_count,
@@ -324,10 +349,11 @@ app.post('/api/checkin', async (req, res) => {
             const { data: giftData, error: giftErr } = await supabase
                 .from('direct_gifts')
                 .insert([{
+                    tenant_id: req.tenantId || customer.tenant_id,
                     customer_id: customerId,
                     type: 'perk',
                     reason: tier.benefit_description,
-                    status: 'pending',
+                    given_by: 'system',
                 }])
                 .select('id')
                 .single();
@@ -429,7 +455,12 @@ app.post('/api/redemption', async (req, res) => {
 
         // Actualizar Google Wallet
         const benefits = await getClientBenefits(customerId);
-        await wallet.updateWalletPass(customerId, customer.visits_count, newPoints, benefits);
+        const { tier: customerTier } = await getTierForCustomer(supabase, customerId);
+        const { data: redeemConfig } = await supabase.from('loyalty_config').select('cycle_visits_required').eq('tenant_id', customer.tenant_id).single();
+        wallet.updateWalletPass(customerId, customer.visits_count, newPoints, benefits, customerTier?.name, {
+            visitsCompleted: customer.cycle_visits_count || 0,
+            visitsRequired: redeemConfig?.cycle_visits_required || 10
+        });
 
         res.json({ 
             success: true, 
@@ -480,6 +511,7 @@ app.post('/api/redemption/gift', async (req, res) => {
 
         // Registrar en redemptions
         await supabase.from('redemptions').insert([{
+            tenant_id: customer.tenant_id,
             customer_id: customerId,
             perk_id: gift.perk_id,
             redeemed_by: redeemedBy

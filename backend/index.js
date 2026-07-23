@@ -259,7 +259,7 @@ app.post('/api/checkin', async (req, res) => {
         // 1. Obtener cliente con información básica
         const { data: customer, error: fetchErr } = await supabase
             .from('customers')
-            .select('visits_count, points_balance, cycle_visits_count, cycles_completed, tier_id')
+            .select('visits_count, points_balance, cycle_visits_count, cycles_completed, tier_id, tenant_id')
             .eq('id', customerId)
             .single();
 
@@ -269,6 +269,7 @@ app.post('/api/checkin', async (req, res) => {
         const { data: configLimit } = await supabase
             .from('loyalty_config')
             .select('max_checkins_per_day')
+            .eq('tenant_id', customer.tenant_id)
             .single();
 
         const maxPerDay = configLimit?.max_checkins_per_day ?? 1;
@@ -311,6 +312,7 @@ app.post('/api/checkin', async (req, res) => {
         const { data: config } = await supabase
             .from('loyalty_config')
             .select('cycle_visits_required, cycle_reward_perk_id')
+            .eq('tenant_id', customer.tenant_id)
             .single();
 
         const cycleConfig = {
@@ -321,7 +323,7 @@ app.post('/api/checkin', async (req, res) => {
         // 5. Insertar registro de visita
         const { data: checkinData, error: checkinErr } = await supabase
             .from('checkins')
-            .insert([{ customer_id: customerId, scanned_by: scannedBy }])
+            .insert([{ tenant_id: customer.tenant_id, customer_id: customerId, scanned_by: scannedBy }])
             .select('id')
             .single();
 

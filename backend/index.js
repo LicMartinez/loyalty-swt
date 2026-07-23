@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const crypto = require('crypto');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -105,8 +106,7 @@ app.post('/api/customers', async (req, res) => {
             .single();
 
         // Generar un UUID para el cliente
-        const { v4: uuidv4 } = require('uuid');
-        const tempId = uuidv4();
+        const tempId = crypto.randomUUID();
 
         // Crear el pase en Google Wallet
         const { objectId, saveUrl } = await wallet.createWalletPassJWT(tempId, name);

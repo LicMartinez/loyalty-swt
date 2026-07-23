@@ -13,12 +13,16 @@ const Register = () => {
         setError('');
         setLoading(true);
 
+        const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+        const tenantSlug = localStorage.getItem('staff_slug') || 'panem';
+
         try {
-            const res = await axios.post('/api/customers', {
+            const res = await axios.post(`${apiBase}/api/customers`, {
                 name: form.name,
                 email: form.email,
                 phone: form.phone,
-                birthday: form.birthday || null
+                birthday: form.birthday || null,
+                tenant_slug: tenantSlug
             });
             setResult(res.data);
         } catch (err) {

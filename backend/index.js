@@ -81,25 +81,48 @@ app.get('/api/wallet/status', async (req, res) => {
 
 // 1. Endpoint: Crear Cliente y emitir Pase
 app.post('/api/customers', async (req, res) => {
-    const { name, email, phone, birthday } = req.body;
+    const { name, email, phone, birthday, tenant_slug } = req.body;
+
+    // Resolver tenant (desde body o default a PANEM)
+    const slug = tenant_slug || 'panem';
+    const { data: tenant, error: tenantErr } = await supabase
+        .from('tenants')
+        .select('id')
+        .eq('slug', slug)
+        .single();
+
+    if (tenantErr || !tenant) {
+        return res.status(400).json({ error: 'Negocio no encontrado' });
+    }
+
     try {
-        // Generar un UUID para el cliente que crearemos
+        // Obtener tier default del tenant
+        const { data: defaultTier } = await supabase
+            .from('loyalty_tiers')
+            .select('id')
+            .eq('tenant_id', tenant.id)
+            .eq('is_default', true)
+            .single();
+
+        // Generar un UUID para el cliente
         const { v4: uuidv4 } = require('uuid');
         const tempId = uuidv4();
 
-        // Crear el pase en Google Wallet usando JWT (más confiable para piloto)
+        // Crear el pase en Google Wallet
         const { objectId, saveUrl } = await wallet.createWalletPassJWT(tempId, name);
 
         // Guardar cliente en Supabase
         const { data: customer, error } = await supabase
             .from('customers')
             .insert([{ 
-                id: tempId, 
+                id: tempId,
+                tenant_id: tenant.id,
                 name, 
                 email, 
                 phone, 
                 birthday: birthday || null,
-                wallet_pass_id: objectId 
+                wallet_pass_id: objectId,
+                tier_id: defaultTier?.id || null,
             }])
             .select()
             .single();

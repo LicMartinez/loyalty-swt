@@ -139,6 +139,7 @@ app.post('/api/customers', async (req, res) => {
 // 2. Endpoint: Leer Perfil de Cliente (Tras escaneo QR)
 app.get('/api/customers/:id', async (req, res) => {
     const customerId = req.params.id;
+    const tenant_slug = req.query.tenant_slug;
     try {
         const { data: customer, error } = await supabase
             .from('customers')
@@ -147,6 +148,19 @@ app.get('/api/customers/:id', async (req, res) => {
             .single();
 
         if (error || !customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+        // Validate tenant isolation if tenant_slug is provided
+        if (tenant_slug) {
+            const { data: staffTenant } = await supabase
+                .from('tenants')
+                .select('id')
+                .eq('slug', tenant_slug)
+                .single();
+
+            if (staffTenant && customer.tenant_id !== staffTenant.id) {
+                return res.status(403).json({ error: 'Este cliente no pertenece a tu programa de lealtad' });
+            }
+        }
         
         // Obtener beneficios activos (canjeables con puntos)
         const { data: perks } = await supabase.from('perks').select('*').eq('is_active', true);
@@ -269,7 +283,7 @@ app.get('/api/customers/:id/progress', async (req, res) => {
 
 // 3. Endpoint: Check-in (Visita) — Refactorizado con tier-engine y cycle-engine
 app.post('/api/checkin', async (req, res) => {
-    const { customerId, scannedBy } = req.body;
+    const { customerId, scannedBy, tenant_slug } = req.body;
 
     // Estado previo para rollback manual
     let prevState = null;
@@ -287,6 +301,19 @@ app.post('/api/checkin', async (req, res) => {
             .single();
 
         if (fetchErr || !customer) throw fetchErr || new Error("Cliente no encontrado");
+
+        // Validar tenant isolation if tenant_slug is provided
+        if (tenant_slug) {
+            const { data: staffTenant } = await supabase
+                .from('tenants')
+                .select('id')
+                .eq('slug', tenant_slug)
+                .single();
+
+            if (staffTenant && customer.tenant_id !== staffTenant.id) {
+                return res.status(403).json({ error: 'Este cliente no pertenece a tu programa de lealtad' });
+            }
+        }
 
         // Validar límite de check-ins por día
         const { data: configLimit } = await supabase

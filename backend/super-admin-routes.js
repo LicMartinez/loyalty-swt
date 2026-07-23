@@ -124,4 +124,29 @@ router.delete('/users/:id', async (req, res) => {
     }
 });
 
+// PUT /api/super/users/:id — Update user email/password
+router.put('/users/:id', async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    const { email, password, is_active } = req.body;
+
+    try {
+        const updateData = {};
+        if (email !== undefined) updateData.email = email;
+        if (is_active !== undefined) updateData.is_active = is_active;
+        if (password) {
+            updateData.password_hash = await bcrypt.hash(password, 12);
+        }
+
+        const { data, error } = await supabase.from('admin_users')
+            .update(updateData)
+            .eq('id', req.params.id)
+            .select('id, username, email, role, is_active')
+            .single();
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

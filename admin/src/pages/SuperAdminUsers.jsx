@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
-import { ArrowLeft, Plus, XCircle, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Plus, XCircle, RefreshCw, Pencil } from 'lucide-react'
 
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
@@ -24,6 +24,9 @@ const SuperAdminUsers = ({ tenant, onBack }) => {
   const [form, setForm] = useState({ username: '', email: '', password: '', role: 'admin' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editForm, setEditForm] = useState({ id: '', email: '', password: '' })
+  const [editSaving, setEditSaving] = useState(false)
 
   const fetchUsers = async () => {
     try {
@@ -69,6 +72,36 @@ const SuperAdminUsers = ({ tenant, onBack }) => {
       setError(err.response?.data?.error || 'Error al crear usuario')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const openEditModal = (user) => {
+    setEditForm({ id: user.id, email: user.email || '', password: '' })
+    setError('')
+    setShowEditModal(true)
+  }
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault()
+    setEditSaving(true)
+    setError('')
+
+    try {
+      const payload = {}
+      if (editForm.email) payload.email = editForm.email
+      if (editForm.password) payload.password = editForm.password
+
+      await axios.put(
+        `${API_BASE}/api/super/users/${editForm.id}`,
+        payload,
+        getAuthHeaders()
+      )
+      setShowEditModal(false)
+      fetchUsers()
+    } catch (err) {
+      setError(err.response?.data?.error || 'Error al actualizar usuario')
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -142,16 +175,26 @@ const SuperAdminUsers = ({ tenant, onBack }) => {
                       : '—'}
                   </td>
                   <td>
-                    {user.is_active && (
+                    <div style={{ display: 'flex', gap: 6 }}>
                       <button
-                        className="btn btn-danger"
+                        className="btn btn-ghost"
                         style={{ fontSize: '0.8rem', padding: '4px 10px' }}
-                        onClick={() => deactivateUser(user.id)}
+                        onClick={() => openEditModal(user)}
                       >
-                        <XCircle size={14} style={{ marginRight: 4 }} />
-                        Desactivar
+                        <Pencil size={14} style={{ marginRight: 4 }} />
+                        Editar
                       </button>
-                    )}
+                      {user.is_active && (
+                        <button
+                          className="btn btn-danger"
+                          style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+                          onClick={() => deactivateUser(user.id)}
+                        >
+                          <XCircle size={14} style={{ marginRight: 4 }} />
+                          Desactivar
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -235,6 +278,58 @@ const SuperAdminUsers = ({ tenant, onBack }) => {
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
                   {saving ? 'Creando...' : 'Crear Usuario'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showEditModal && (
+        <div className="modal-overlay" onClick={() => setShowEditModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginBottom: 16 }}>Editar Usuario</h3>
+            <form onSubmit={handleEditSubmit}>
+              <div className="form-group">
+                <label className="form-label">Email</label>
+                <input
+                  type="email"
+                  className="form-input"
+                  value={editForm.email}
+                  onChange={e => setEditForm(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="nuevo@email.com"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Nueva Contraseña (dejar vacío para no cambiar)</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editForm.password}
+                    onChange={e => setEditForm(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="Dejar vacío para mantener"
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setEditForm(prev => ({ ...prev, password: generatePassword() }))}
+                    title="Generar contraseña"
+                  >
+                    <RefreshCw size={16} />
+                  </button>
+                </div>
+              </div>
+              {error && (
+                <p style={{ color: 'var(--danger, #ef4444)', fontSize: '0.85rem', marginBottom: 12 }}>{error}</p>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowEditModal(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={editSaving}>
+                  {editSaving ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
             </form>

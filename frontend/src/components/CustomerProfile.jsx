@@ -10,8 +10,10 @@ const CustomerProfile = ({ customerId, onReset }) => {
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
 
+    const tenantSlug = localStorage.getItem('staff_slug') || '';
+
     useEffect(() => {
-        axios.get(`${API_URL}/customers/${customerId}`)
+        axios.get(`${API_URL}/customers/${customerId}?tenant_slug=${tenantSlug}`)
             .then(res => {
                 setData(res.data);
                 setLoading(false);
@@ -28,7 +30,8 @@ const CustomerProfile = ({ customerId, onReset }) => {
         try {
             const res = await axios.post(`${API_URL}/checkin`, { 
                 customerId, 
-                scannedBy: 'Staff'
+                scannedBy: 'Staff',
+                tenant_slug: tenantSlug
             });
             setData(prev => ({
                 ...prev,
@@ -41,7 +44,7 @@ const CustomerProfile = ({ customerId, onReset }) => {
             alert('¡Check-in exitoso!');
         } catch (error) {
             console.error(error);
-            alert('Error en check-in');
+            alert(error.response?.data?.error || 'Error en check-in');
         } finally {
             setActionLoading(false);
         }
@@ -55,7 +58,8 @@ const CustomerProfile = ({ customerId, onReset }) => {
             const res = await axios.post(`${API_URL}/redemption`, { 
                 customerId, 
                 perkId, 
-                redeemedBy: 'Staff' 
+                redeemedBy: 'Staff',
+                tenant_slug: tenantSlug
             });
             setData(prev => ({
                 ...prev,
@@ -85,7 +89,8 @@ const CustomerProfile = ({ customerId, onReset }) => {
             const res = await axios.post(`${API_URL}/redemption/gift`, { 
                 customerId, 
                 giftId, 
-                redeemedBy: 'Staff' 
+                redeemedBy: 'Staff',
+                tenant_slug: tenantSlug
             });
             // Remover el regalo de la lista
             setData(prev => ({

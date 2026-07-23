@@ -23,13 +23,16 @@ const Login = ({ onLogin }) => {
         password
       })
 
-      // Guardar token y datos del tenant
+      // Guardar token y datos del tenant y usuario
       localStorage.setItem('tenant_slug', slug.trim())
       if (res.data.tenant) {
         localStorage.setItem('tenant_data', JSON.stringify(res.data.tenant))
       }
+      if (res.data.user) {
+        localStorage.setItem('user_data', JSON.stringify(res.data.user))
+      }
 
-      onLogin(res.data.token)
+      onLogin(res.data.token, res.data.user)
     } catch (err) {
       setError(err.response?.data?.error || 'Error de conexión')
     } finally {

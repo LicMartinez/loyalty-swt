@@ -88,7 +88,7 @@ app.post('/api/customers', async (req, res) => {
     const slug = tenant_slug || 'panem';
     const { data: tenant, error: tenantErr } = await supabase
         .from('tenants')
-        .select('id')
+        .select('id, wallet_class_id, wallet_issuer_name, wallet_program_name, wallet_bg_color, wallet_logo_url')
         .eq('slug', slug)
         .single();
 
@@ -108,8 +108,8 @@ app.post('/api/customers', async (req, res) => {
         // Generar un UUID para el cliente
         const tempId = crypto.randomUUID();
 
-        // Crear el pase en Google Wallet
-        const { objectId, saveUrl } = await wallet.createWalletPassJWT(tempId, name);
+        // Crear el pase en Google Wallet (con config del tenant)
+        const { objectId, saveUrl } = await wallet.createWalletPassJWT(tempId, name, tenant);
 
         // Guardar cliente en Supabase
         const { data: customer, error } = await supabase

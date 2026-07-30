@@ -21,49 +21,51 @@ const client = auth.fromJSON(credentials);
 client.scopes = ['https://www.googleapis.com/auth/wallet_object.issuer'];
 
 /**
- * Asegura que la Loyalty Class existe. Si no existe, la crea.
+ * Asegura que una Loyalty Class existe para un tenant. Si no existe, la crea.
+ * Soporta multi-tenant: cada marca tiene su propia Loyalty Class.
  */
-let classVerified = false;
-async function ensureLoyaltyClassExists() {
-    if (classVerified) return;
+const verifiedClasses = new Set();
+async function ensureLoyaltyClassExists(tenantConfig) {
+    const classId = tenantConfig?.wallet_class_id || CLASS_ID;
     
-    const url = `https://walletobjects.googleapis.com/walletobjects/v1/loyaltyClass/${CLASS_ID}`;
+    if (verifiedClasses.has(classId)) return;
+    
+    const url = `https://walletobjects.googleapis.com/walletobjects/v1/loyaltyClass/${classId}`;
     
     try {
         await client.request({ url, method: 'GET' });
-        console.log(`Loyalty Class ${CLASS_ID} verificada correctamente.`);
-        classVerified = true;
+        console.log(`Loyalty Class ${classId} verificada.`);
+        verifiedClasses.add(classId);
     } catch (error) {
         if (error.response?.status === 404) {
-            // La clase no existe, la creamos
-            console.log(`Loyalty Class ${CLASS_ID} no existe. Creándola...`);
+            console.log(`Loyalty Class ${classId} no existe. Creándola...`);
             const createUrl = 'https://walletobjects.googleapis.com/walletobjects/v1/loyaltyClass';
             const classData = {
-                id: CLASS_ID,
-                issuerName: 'PANEM',
-                programName: 'Loyalty PANEM',
+                id: classId,
+                issuerName: tenantConfig?.wallet_issuer_name || 'Loyalty',
+                programName: tenantConfig?.wallet_program_name || 'Loyalty Program',
                 programLogo: {
                     sourceUri: {
-                        uri: 'https://storage.googleapis.com/wallet-lab-tools-codelab-artifacts-public/pass_google_logo.jpg'
+                        uri: tenantConfig?.wallet_logo_url || 'https://storage.googleapis.com/wallet-lab-tools-codelab-artifacts-public/pass_google_logo.jpg'
                     },
                     contentDescription: {
                         defaultValue: {
                             language: 'es-MX',
-                            value: 'PANEM Logo'
+                            value: `${tenantConfig?.wallet_issuer_name || 'Loyalty'} Logo`
                         }
                     }
                 },
                 reviewStatus: 'UNDER_REVIEW',
                 countryCode: 'MX',
-                hexBackgroundColor: '#1a1a2e',
+                hexBackgroundColor: tenantConfig?.wallet_bg_color || '#1a1a2e',
                 accountNameLabel: 'Nombre',
                 accountIdLabel: 'ID Cliente'
             };
             
             try {
                 await client.request({ url: createUrl, method: 'POST', data: classData });
-                console.log(`Loyalty Class ${CLASS_ID} creada exitosamente.`);
-                classVerified = true;
+                console.log(`Loyalty Class ${classId} creada exitosamente.`);
+                verifiedClasses.add(classId);
             } catch (createError) {
                 console.error('Error creando Loyalty Class:', createError.response?.data || createError.message);
                 throw createError;
@@ -290,17 +292,22 @@ function updateWalletPassOnTierChange(customerId, walletPassId, tierName, cycleP
 
 /**
  * Crea un pase para un nuevo cliente.
- * Primero asegura que la clase existe, luego genera el JWT con el objeto completo.
+ * Soporta multi-tenant: usa la Loyalty Class del tenant.
+ * @param {string} customerId - UUID del cliente
+ * @param {string} customerName - Nombre del cliente
+ * @param {object} tenantConfig - Config del tenant (wallet_class_id, wallet_program_name, etc.)
  */
-async function createWalletPassJWT(customerId, customerName) {
+async function createWalletPassJWT(customerId, customerName, tenantConfig) {
+    const classId = tenantConfig?.wallet_class_id || CLASS_ID;
+    
     // Asegurar que la clase existe antes de crear el objeto
-    await ensureLoyaltyClassExists();
+    await ensureLoyaltyClassExists(tenantConfig);
     
     const objectId = `${ISSUER_ID}.${customerId}`;
     
     const loyaltyObject = {
         id: objectId,
-        classId: CLASS_ID,
+        classId: classId,
         state: 'ACTIVE',
         accountId: customerId,
         accountName: customerName,

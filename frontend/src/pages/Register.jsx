@@ -8,13 +8,15 @@ const Register = () => {
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
 
+    const tenantSlug = localStorage.getItem('staff_slug') || 'panem';
+    const tenantName = localStorage.getItem('staff_tenant_name') || tenantSlug.toUpperCase();
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setLoading(true);
 
         const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
-        const tenantSlug = localStorage.getItem('staff_slug') || 'panem';
 
         try {
             const res = await axios.post(`${apiBase}/api/customers`, {
@@ -39,7 +41,7 @@ const Register = () => {
                     <CheckCircle size={56} color="var(--success)" style={{ margin: '0 auto 16px' }} />
                     <h2 className="mb-2">¡Registro Exitoso!</h2>
                     <p className="text-muted mb-4">
-                        Bienvenido al programa de lealtad PANEM, <strong>{form.name}</strong>.
+                        Bienvenido al programa de lealtad {tenantName}, <strong>{form.name}</strong>.
                     </p>
                     <p style={{ fontSize: '0.9rem', marginBottom: 20 }}>
                         Agrega tu pase a Google Wallet para acumular puntos y recibir beneficios exclusivos.
@@ -61,11 +63,6 @@ const Register = () => {
                             fontSize: '1rem'
                         }}
                     >
-                        <img 
-                            src="https://pay.google.com/about/static_kcs/images/logos/google-pay-logo.png" 
-                            alt="Google Wallet" 
-                            style={{ height: 24 }} 
-                        />
                         Agregar a Google Wallet
                     </a>
                     <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 16 }}>
@@ -81,7 +78,7 @@ const Register = () => {
             <div className="card" style={{ maxWidth: 450, width: '100%' }}>
                 <div className="text-center mb-4">
                     <UserPlus size={40} color="var(--primary)" style={{ margin: '0 auto 12px' }} />
-                    <h2 className="mb-2">PANEM Loyalty</h2>
+                    <h2 className="mb-2">{tenantName} Loyalty</h2>
                     <p className="text-muted">Regístrate para comenzar a acumular puntos y beneficios</p>
                 </div>
 
@@ -143,7 +140,7 @@ const Register = () => {
                 </form>
 
                 <p className="text-muted text-center" style={{ fontSize: '0.75rem', marginTop: 16 }}>
-                    Al registrarte aceptas participar en el programa de lealtad PANEM.
+                    Al registrarte aceptas participar en el programa de lealtad {tenantName}.
                 </p>
             </div>
         </div>

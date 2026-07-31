@@ -162,8 +162,8 @@ app.get('/api/customers/:id', async (req, res) => {
             }
         }
         
-        // Obtener beneficios activos (canjeables con puntos)
-        const { data: perks } = await supabase.from('perks').select('*').eq('is_active', true);
+        // Obtener beneficios activos (canjeables con puntos) — filtrados por tenant
+        const { data: perks } = await supabase.from('perks').select('*').eq('tenant_id', customer.tenant_id).eq('is_active', true);
         
         // Obtener regalos directos pendientes (tipo perk que no se han redimido)
         const { data: pendingGifts } = await supabase
@@ -185,13 +185,13 @@ app.get('/api/customers/:id/benefits', async (req, res) => {
     try {
         const { data: customer, error } = await supabase
             .from('customers')
-            .select('name, visits_count, points_balance')
+            .select('name, visits_count, points_balance, tenant_id')
             .eq('id', customerId)
             .single();
 
         if (error || !customer) return res.status(404).json({ error: 'Cliente no encontrado' });
         
-        const { data: perks } = await supabase.from('perks').select('id, name, description, cost_points').eq('is_active', true);
+        const { data: perks } = await supabase.from('perks').select('id, name, description, cost_points').eq('tenant_id', customer.tenant_id).eq('is_active', true);
         
         const { data: pendingGifts } = await supabase
             .from('direct_gifts')

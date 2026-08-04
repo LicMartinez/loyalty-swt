@@ -92,6 +92,38 @@ router.get('/checkins/recent', adminAuth, async (req, res) => {
 
 // ============ CUSTOMERS ============
 
+router.get('/customers/export', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    try {
+        const { data: customers, error } = await supabase
+            .from('customers')
+            .select('id, name, email, phone, birthday, visits_count, points_balance, created_at, tier_id, loyalty_tiers(name)')
+            .eq('tenant_id', req.tenantId)
+            .order('name');
+        if (error) throw error;
+
+        // Get last checkin for each customer
+        const enriched = await Promise.all((customers || []).map(async (c) => {
+            const { data: lastCheckin } = await supabase
+                .from('checkins')
+                .select('created_at')
+                .eq('customer_id', c.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
+            return {
+                ...c,
+                tier_name: c.loyalty_tiers?.name || 'Bronce',
+                last_checkin: lastCheckin?.created_at || null
+            };
+        }));
+
+        res.json(enriched);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 router.get('/customers', adminAuth, async (req, res) => {
     const supabase = req.app.locals.supabase;
     try {
@@ -870,6 +902,27 @@ router.post('/printers/:id/test', adminAuth, async (req, res) => {
 
         await sendToPrinter(printer.ip_address, printer.port, testTicket);
         res.json({ success: true, message: 'Ticket de prueba enviado correctamente' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============ DELETE CUSTOMER ============
+
+router.delete('/customers/:id', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    try {
+        const customerId = req.params.id;
+        // Delete related records first (FK constraints)
+        await supabase.from('checkins').delete().eq('customer_id', customerId).eq('tenant_id', req.tenantId);
+        await supabase.from('redemptions').delete().eq('customer_id', customerId).eq('tenant_id', req.tenantId);
+        await supabase.from('direct_gifts').delete().eq('customer_id', customerId).eq('tenant_id', req.tenantId);
+        await supabase.from('tier_change_history').delete().eq('customer_id', customerId).eq('tenant_id', req.tenantId);
+        await supabase.from('cycle_rewards').delete().eq('customer_id', customerId).eq('tenant_id', req.tenantId);
+        // Delete customer
+        const { error } = await supabase.from('customers').delete().eq('id', customerId).eq('tenant_id', req.tenantId);
+        if (error) throw error;
+        res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

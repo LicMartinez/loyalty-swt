@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Users, Search, Gift, Plus, Edit2, Trash2 } from 'lucide-react'
+import { Users, Search, Gift, Plus, Edit2, Trash2, Download } from 'lucide-react'
 import api from '../api'
 
 const Customers = () => {
@@ -94,6 +94,48 @@ const Customers = () => {
     }
   }
 
+  const handleDelete = async (customer) => {
+    if (!confirm(`¿Eliminar al cliente "${customer.name}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      await api.delete(`/customers/${customer.id}`);
+      loadCustomers();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Error al eliminar');
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const res = await api.get('/customers/export');
+      const data = res.data;
+
+      const headers = ['Nombre', 'Email', 'Teléfono', 'Cumpleaños', 'Visitas', 'Puntos', 'Nivel', 'Fecha Registro', 'Último Check-in'];
+      const rows = data.map(c => {
+        const birthday = c.birthday ? new Date(c.birthday + 'T12:00:00').toLocaleDateString('es-MX') : '';
+        const registered = new Date(c.created_at).toLocaleDateString('es-MX');
+        const lastCheckin = c.last_checkin ? new Date(c.last_checkin).toLocaleDateString('es-MX') + ' ' + new Date(c.last_checkin).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '';
+        return [
+          `"${c.name}"`, `"${c.email || ''}"`, `"${c.phone || ''}"`,
+          `"${birthday}"`, c.visits_count, c.points_balance,
+          `"${c.tier_name}"`, `"${registered}"`, `"${lastCheckin}"`
+        ].join(',');
+      });
+
+      const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `clientes_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Error al exportar');
+    }
+  };
+
   const filtered = customers.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.email.toLowerCase().includes(search.toLowerCase()) ||
@@ -104,6 +146,9 @@ const Customers = () => {
     <div>
       <div className="page-header">
         <h1 className="page-title">Clientes</h1>
+        <button className="btn btn-ghost" onClick={handleExport}>
+          <Download size={16} /> Exportar Excel
+        </button>
       </div>
 
       <div className="card">
@@ -147,7 +192,7 @@ const Customers = () => {
                   <td>{c.visits_count}</td>
                   <td><span className="badge badge-primary">{c.points_balance} pts</span></td>
                   <td className="text-muted">
-                    {c.birthday ? new Date(c.birthday).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : '—'}
+                    {c.birthday ? new Date(c.birthday + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : '—'}
                   </td>
                   <td>
                     <div className="flex gap-2">
@@ -156,6 +201,9 @@ const Customers = () => {
                       </button>
                       <button className="btn btn-sm btn-primary" onClick={() => handleGift(c)} title="Regalar">
                         <Gift size={14} />
+                      </button>
+                      <button className="btn btn-sm btn-danger" onClick={() => handleDelete(c)} title="Eliminar">
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </td>

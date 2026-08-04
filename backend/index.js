@@ -80,6 +80,47 @@ app.get('/api/wallet/status', async (req, res) => {
     }
 });
 
+// Apple Wallet — Descargar .pkpass para un cliente
+const appleWallet = require('./apple-wallet');
+
+app.get('/api/customers/:id/apple-pass', async (req, res) => {
+    const customerId = req.params.id;
+    try {
+        // Obtener cliente y tenant info
+        const { data: customer, error } = await supabase
+            .from('customers')
+            .select('id, name, tenant_id, points_balance, cycle_visits_count, tier_id')
+            .eq('id', customerId)
+            .single();
+
+        if (error || !customer) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+        // Obtener info del tenant
+        const { data: tenant } = await supabase
+            .from('tenants')
+            .select('name, wallet_program_name, wallet_bg_color, wallet_issuer_name, wallet_logo_url')
+            .eq('id', customer.tenant_id)
+            .single();
+
+        // Generar .pkpass
+        const passBuffer = await appleWallet.createApplePass({
+            customerId: customer.id,
+            customerName: customer.name,
+            tenant
+        });
+
+        res.set({
+            'Content-Type': 'application/vnd.apple.pkpass',
+            'Content-Disposition': `attachment; filename="loyalty-${customerId}.pkpass"`,
+        });
+        res.send(passBuffer);
+    } catch (err) {
+        console.error('[apple-wallet] Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
 // 1. Endpoint: Crear Cliente y emitir Pase
 app.post('/api/customers', async (req, res) => {
     const { name, email, phone, birthday, tenant_slug } = req.body;
@@ -129,7 +170,13 @@ app.post('/api/customers', async (req, res) => {
 
         if (error) throw error;
 
-        res.json({ success: true, customer, saveUrl });
+        // URL para Apple Wallet
+        const apiBase = process.env.VERCEL_URL 
+            ? `https://${process.env.VERCEL_URL}` 
+            : (process.env.CLIENT_PORTAL_URL || 'https://loyalty-api-rho.vercel.app');
+        const applePassUrl = `${apiBase}/api/customers/${tempId}/apple-pass`;
+
+        res.json({ success: true, customer, saveUrl, applePassUrl });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: error.message });

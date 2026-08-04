@@ -35,6 +35,9 @@ const Register = () => {
     };
 
     if (result) {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
         return (
             <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
                 <div className="card text-center" style={{ maxWidth: 450 }}>
@@ -44,27 +47,57 @@ const Register = () => {
                         Bienvenido al programa de lealtad {tenantName}, <strong>{form.name}</strong>.
                     </p>
                     <p style={{ fontSize: '0.9rem', marginBottom: 20 }}>
-                        Agrega tu pase a Google Wallet para acumular puntos y recibir beneficios exclusivos.
+                        Agrega tu pase a tu Wallet para acumular puntos y recibir beneficios exclusivos.
                     </p>
-                    <a 
-                        href={result.saveUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            background: '#000',
-                            color: '#fff',
-                            padding: '14px 28px',
-                            borderRadius: 12,
-                            textDecoration: 'none',
-                            fontWeight: 600,
-                            fontSize: '1rem'
-                        }}
-                    >
-                        Agregar a Google Wallet
-                    </a>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {/* Apple Wallet — mostrar en iOS o siempre */}
+                        {result.applePassUrl && (
+                            <a 
+                                href={result.applePassUrl} 
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 8,
+                                    background: '#000',
+                                    color: '#fff',
+                                    padding: '14px 28px',
+                                    borderRadius: 12,
+                                    textDecoration: 'none',
+                                    fontWeight: 600,
+                                    fontSize: '1rem'
+                                }}
+                            >
+                                🍎 Agregar a Apple Wallet
+                            </a>
+                        )}
+
+                        {/* Google Wallet */}
+                        {result.saveUrl && (
+                            <a 
+                                href={result.saveUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 8,
+                                    background: isIOS ? '#333' : '#000',
+                                    color: '#fff',
+                                    padding: '14px 28px',
+                                    borderRadius: 12,
+                                    textDecoration: 'none',
+                                    fontWeight: 600,
+                                    fontSize: '1rem'
+                                }}
+                            >
+                                Agregar a Google Wallet
+                            </a>
+                        )}
+                    </div>
+
                     <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 16 }}>
                         Una vez agregado, muestra el código QR de tu pase en el establecimiento para registrar tus visitas.
                     </p>

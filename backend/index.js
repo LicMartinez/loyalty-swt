@@ -172,9 +172,7 @@ app.post('/api/customers', async (req, res) => {
         if (error) throw error;
 
         // URL para Apple Wallet
-        const apiBase = process.env.VERCEL_URL 
-            ? `https://${process.env.VERCEL_URL}` 
-            : (process.env.CLIENT_PORTAL_URL || 'https://loyalty-api-rho.vercel.app');
+        const apiBase = 'https://loyalty-api-rho.vercel.app';
         const applePassUrl = `${apiBase}/api/customers/${tempId}/apple-pass`;
 
         res.json({ success: true, customer, saveUrl, applePassUrl });

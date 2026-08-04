@@ -138,6 +138,68 @@ app.post('/api/customers', async (req, res) => {
         return res.status(400).json({ error: 'Negocio no encontrado' });
     }
 
+    // === VALIDACIÓN DE DATOS ===
+    
+    // Validar email
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ error: 'Correo electrónico inválido' });
+    }
+
+    // Bloquear dominios de correos temporales/desechables
+    const disposableDomains = [
+        'tempmail.com', 'throwaway.email', 'guerrillamail.com', 'guerrillamail.net',
+        'sharklasers.com', 'grr.la', 'guerrillamailblock.com', 'pokemail.net',
+        'spam4.me', 'bccto.me', 'chacuo.net', 'discard.email', 'discardmail.com',
+        'discardmail.de', 'emailisvalid.com', 'emkei.cf', 'fakeinbox.com',
+        'filzmail.com', 'getairmail.com', 'getnada.com', 'mailcatch.com',
+        'mailinator.com', 'mailnesia.com', 'mailtothis.com', 'nowmymail.com',
+        'sharklasers.com', 'spamfree24.org', 'tempail.com', 'tempalias.com',
+        'tempinbox.com', 'tempmail.net', 'tempmailaddress.com', 'throwam.com',
+        'trashmail.com', 'trashmail.me', 'trashmail.net', 'yopmail.com',
+        'yopmail.fr', 'yopmail.net', 'zeroe.ml', '10minutemail.com',
+        'minutemail.com', 'mohmal.com', 'burnermail.io', 'mailnator.com',
+        'temp-mail.org', 'tempmailo.com', 'emailondeck.com', 'crazymailing.com',
+        'armyspy.com', 'dayrep.com', 'einrot.com', 'fleckens.hu',
+        'gustr.com', 'jourrapide.com', 'rhyta.com', 'superrito.com',
+        'teleworm.us', 'amupx.com', 'tmpmail.net', 'tmpmail.org',
+        'tempr.email', 'dispostable.com', 'mailscrap.com', 'instant-mail.de',
+        'trashinbox.com', 'mailsac.com', 'maildrop.cc', 'inboxkitten.com'
+    ];
+
+    const emailDomain = email.split('@')[1]?.toLowerCase();
+    if (!emailDomain || disposableDomains.includes(emailDomain)) {
+        return res.status(400).json({ error: 'No se permiten correos electrónicos temporales o desechables' });
+    }
+
+    // Validar que el dominio tiene un TLD reconocido (no inventado)
+    const validTLDs = ['com', 'net', 'org', 'mx', 'edu', 'gov', 'info', 'io', 'co', 'es', 'com.mx', 'gob.mx', 'edu.mx', 'app', 'dev', 'me', 'us', 'uk', 'de', 'fr', 'it', 'br', 'ar', 'cl', 'pe', 'co.uk'];
+    const domainParts = emailDomain.split('.');
+    const tld = domainParts.slice(-2).join('.'); // com.mx
+    const simpleTld = domainParts[domainParts.length - 1]; // com
+    if (!validTLDs.includes(tld) && !validTLDs.includes(simpleTld)) {
+        return res.status(400).json({ error: 'El dominio del correo no es válido' });
+    }
+
+    // Validar teléfono (si se proporcionó)
+    if (phone) {
+        const cleanPhone = phone.replace(/[\s\-\(\)\+]/g, '').replace(/^(52|521)/, '');
+        if (!/^\d{10}$/.test(cleanPhone)) {
+            return res.status(400).json({ error: 'El teléfono debe tener 10 dígitos' });
+        }
+    }
+
+    // Verificar que el email no esté ya registrado en este tenant
+    const { data: existingCustomer } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('tenant_id', tenant.id)
+        .eq('email', email.toLowerCase().trim())
+        .single();
+
+    if (existingCustomer) {
+        return res.status(409).json({ error: 'Ya existe un cliente registrado con este correo electrónico' });
+    }
+
     try {
         // Obtener tier default del tenant
         const { data: defaultTier } = await supabase
@@ -160,7 +222,7 @@ app.post('/api/customers', async (req, res) => {
                 id: tempId,
                 tenant_id: tenant.id,
                 name, 
-                email, 
+                email: email.toLowerCase().trim(), 
                 phone, 
                 birthday: birthday || null,
                 wallet_pass_id: objectId,

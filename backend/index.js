@@ -111,7 +111,8 @@ app.get('/api/customers/:id/apple-pass', async (req, res) => {
 
         res.set({
             'Content-Type': 'application/vnd.apple.pkpass',
-            'Content-Disposition': `attachment; filename="loyalty-${customerId}.pkpass"`,
+            'Content-Disposition': `inline; filename="loyalty.pkpass"`,
+            'Content-Transfer-Encoding': 'binary',
         });
         res.send(passBuffer);
     } catch (err) {

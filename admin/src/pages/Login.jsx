@@ -24,7 +24,10 @@ const Login = ({ onLogin }) => {
       })
 
       // Guardar token y datos del tenant y usuario
-      localStorage.setItem('tenant_slug', slug.trim())
+      const resolvedSlug = (res.data.tenant?.slug || slug).trim().toLowerCase()
+      if (resolvedSlug) {
+        localStorage.setItem('tenant_slug', resolvedSlug)
+      }
       if (res.data.tenant) {
         localStorage.setItem('tenant_data', JSON.stringify(res.data.tenant))
       }

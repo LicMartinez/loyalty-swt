@@ -1,110 +1,75 @@
-# SW Loyalty — Documentación del Proyecto
+# SW Loyalty — Documentación
 
-## Estado Actual: MVP Single-Tenant (PANEM)
+## Empieza aquí
 
-El sistema está funcionando como programa de lealtad para un solo negocio (PANEM) con las siguientes capacidades:
-- Registro de clientes con pase de Google Wallet
-- Scanner QR desde iPad/tablet para check-in
-- Acumulación de puntos por visita
-- Redención de beneficios (con puntos o cortesías directas)
-- Panel de administración completo
-- Impresión de tickets térmicos
-- Portal de beneficios para el cliente (accesible desde Wallet)
-- Marketing por proximidad (geolocalización en Wallet)
+| Prioridad | Documento | Para qué |
+|-----------|-----------|----------|
+| **1** | **[00 — Estado actual (As-Built)](./00-ESTADO-ACTUAL.md)** | Fuente de verdad técnica. Stack, apps, API, BD, flujos, gotchas. **Léelo antes de explorar el código.** |
+| **2** | [Manual de instalación y uso](./MANUAL-DE-INSTALACION.md) | Portales en producción, Print Bridge, guías de uso |
 
 ---
 
-## Documentación de Migración a SaaS
+## Estado del sistema (resumen)
 
-| Documento | Contenido |
-|-----------|-----------|
-| [01 - Arquitectura SaaS](./01-arquitectura-saas.md) | Stack tecnológico, estrategia multi-tenant, estructura del proyecto |
-| [02 - Modelo de Datos](./02-modelo-datos-multitenant.md) | Schema SQL, RLS policies, migración de datos existentes |
-| [03 - Plan de Migración](./03-plan-migracion.md) | Fases de implementación, timeline, costos operativos |
-| [04 - Apple Wallet](./04-apple-wallet-integracion.md) | Integración PassKit, certificados, push updates |
-| [05 - Deploy Producción](./05-deploy-produccion.md) | Guía paso a paso para Vercel, Next.js, configuración |
-| [06 - Branding por Tenant](./06-branding-por-tenant.md) | Personalización visual, CSS variables, Wallet branding |
+Plataforma **multi-tenant operativa**:
+- Backend Express en Vercel + Supabase
+- Frontend Vite (staff / registro / beneficios)
+- Admin Vite (marca + Super Admin)
+- Google Wallet + Apple Wallet
+- Tiers, ciclos/sellos, impresión térmica vía Print Bridge
+
+> El resto de documentos `01`–`06` son **planes / histórico**. Muchos asumen Next.js, single-tenant o features no implementadas. Contrastar siempre con `00-ESTADO-ACTUAL.md`.
 
 ---
 
-## Arquitectura Actual (MVP)
+## Arquitectura actual (runtime)
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Frontend (Vite + React) — Puerto 5173              │
-│  • / — Staff scanner                               │
-│  • /register — Auto-registro clientes              │
-│  • /benefits/:id — Portal de beneficios            │
-└─────────────────────────────────────────────────────┘
-         │ (proxy /api → backend)
-┌─────────────────────────────────────────────────────┐
-│  Backend (Express.js) — Puerto 3000                 │
-│  • /api/customers — CRUD clientes + Wallet         │
-│  • /api/checkin — Registro de visitas              │
-│  • /api/redemption — Canje de beneficios           │
-│  • /api/admin/* — Panel de administración          │
-│  • /api/print — Bridge impresión por red           │
-└─────────────────────────────────────────────────────┘
-         │
-┌─────────────────────────────────────────────────────┐
-│  Admin Panel (Vite + React) — Puerto 5174           │
-│  • Dashboard, Clientes, Premios, Promociones       │
-│  • Reportes, Configuración, Regalos directos       │
-└─────────────────────────────────────────────────────┘
-         │
-┌─────────────────────────────────────────────────────┐
-│  Supabase (angmhxtwcfbcpsozkuka)                   │
-│  • customers, perks, checkins, redemptions         │
-│  • promotions, direct_gifts, loyalty_config        │
-└─────────────────────────────────────────────────────┘
-         │
-┌─────────────────────────────────────────────────────┐
-│  Google Wallet API                                  │
-│  • Issuer: 3388000000023147315                     │
-│  • Class: Loyalty_PANEM                            │
-│  • Barcode QR con UUID del cliente                 │
-└─────────────────────────────────────────────────────┘
+frontend :5173 (staff, register, benefits)
+admin    :5174 (tenant admin + super_admin)
+    │ proxy /api
+    ▼
+backend Express :3000 / Vercel
+    │ service role
+    ▼
+Supabase PostgreSQL
+
+iPad ──HTTPS──► Print Bridge :4001 ──TCP──► Impresora :9100
 ```
 
 ---
 
-## Credenciales y Accesos
-
-| Servicio | Ubicación |
-|----------|-----------|
-| Supabase | `backend/.env` (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) |
-| Google Wallet | `backend/.env` (GOOGLE_ISSUER_ID, GOOGLE_CLASS_ID) |
-| GCP Service Account | `backend/gcp-service-account.json` |
-| Admin Panel | `backend/.env` (ADMIN_USER, ADMIN_PASS) |
-
----
-
-## Comandos de Desarrollo
+## Comandos de desarrollo
 
 ```bash
-# Backend
-cd backend && npm run dev
-
-# Frontend (Staff + Registro + Beneficios)
-cd frontend && npm run dev
-
-# Admin Panel
-cd admin && npm run dev
+cd backend && npm run dev      # :3000
+cd frontend && npm run dev     # :5173
+cd admin && npm run dev        # :5174
+cd print-bridge && node index.js  # :4001
 ```
 
 ---
 
-## Decisión: ¿Por qué Vercel + Supabase es suficiente?
+## Documentación histórica / roadmap
 
-No se necesita Railway, Render, ni ningún servidor adicional porque:
+| Documento | Nota |
+|-----------|------|
+| [01 - Arquitectura SaaS](./01-arquitectura-saas.md) | Plan Next.js — **no es el stack actual** |
+| [02 - Modelo de datos](./02-modelo-datos-multitenant.md) | Diseño; usa `tenant_users`/Auth Supabase (implementado: `admin_users` + JWT) |
+| [02 - Multi-tenant implementation](./02-multi-tenant-implementation.md) | Plan de migración |
+| [03 - Plan de migración](./03-plan-migracion.md) | Roadmap fases |
+| [03 - Thermal printing](./03-thermal-printing-multi-printer.md) | Diseño; multi-impresora ya existe en código |
+| [04 - Apple Wallet](./04-apple-wallet-integracion.md) | Referencia PassKit (parcialmente vigente) |
+| [04 - Transfer points](./04-transfer-points-gifts.md) | **No implementado** |
+| [05 - Deploy producción](./05-deploy-produccion.md) | Plan Next — no aplicado |
+| [05 - Pre-deploy security](./05-pre-deploy-security-and-auth.md) | Checklist; auth JWT ya existe |
+| [06 - Branding por tenant](./06-branding-por-tenant.md) | **UI no implementada** |
+| [06 - Platform SaaS consolidado](./06-platform-saas-consolidado.md) | Sprints; mezcla hecho/pendiente |
 
-1. **Next.js API Routes** reemplazan Express.js como funciones serverless
-2. **Supabase** maneja DB, Auth, Storage y Realtime en una sola plataforma
-3. **Vercel** escala automáticamente sin gestionar servidores
-4. **No hay procesos de larga duración** — todas las operaciones son request/response
-5. **La impresión térmica** se maneja desde el navegador (Web Serial) o vía red local (no necesita servidor central)
+---
 
-El único caso donde se necesitaría un servidor persistente es si se implementaran:
-- Cron jobs de más de 60 segundos (Vercel Cron cubre hasta 60s)
-- WebSockets custom (Supabase Realtime ya lo cubre)
-- Procesamiento de video/imágenes pesado (no aplica)
+## Credenciales y secretos
+
+Ver `backend/.env` y el [Manual](./MANUAL-DE-INSTALACION.md). No documentar passwords en commits nuevos.
+
+Para agentes de Cursor: la regla del proyecto apunta a `docs/00-ESTADO-ACTUAL.md` como contexto obligatorio.

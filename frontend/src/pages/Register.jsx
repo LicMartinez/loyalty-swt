@@ -1,16 +1,22 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { UserPlus, CheckCircle, Loader2 } from 'lucide-react';
+import { UserPlus, CheckCircle, Loader2, AlertTriangle } from 'lucide-react';
 
 const Register = () => {
+    const [searchParams] = useSearchParams();
+    const tenantSlug = (searchParams.get('tenant') || '').trim().toLowerCase();
+
     const [form, setForm] = useState({ name: '', email: '', phone: '', birthday: '' });
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
     const [fieldErrors, setFieldErrors] = useState({});
 
-    const tenantSlug = localStorage.getItem('staff_slug') || 'panem';
-    const tenantName = localStorage.getItem('staff_tenant_name') || tenantSlug.toUpperCase();
+    const tenantName = useMemo(() => {
+        if (!tenantSlug) return '';
+        return tenantSlug.charAt(0).toUpperCase() + tenantSlug.slice(1);
+    }, [tenantSlug]);
 
     const validate = () => {
         const errors = {};
@@ -45,6 +51,12 @@ const Register = () => {
         setError('');
         setLoading(true);
 
+        if (!tenantSlug) {
+            setError('Link de registro inválido: falta el negocio.');
+            setLoading(false);
+            return;
+        }
+
         if (!validate()) {
             setLoading(false);
             return;
@@ -68,6 +80,24 @@ const Register = () => {
         }
     };
 
+    if (!tenantSlug) {
+        return (
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+                <div className="card text-center" style={{ maxWidth: 450 }}>
+                    <AlertTriangle size={48} color="var(--warning, #f59e0b)" style={{ margin: '0 auto 16px' }} />
+                    <h2 className="mb-2">Link de registro incompleto</h2>
+                    <p className="text-muted">
+                        Este portal es compartido entre varios negocios. Debes abrir el enlace o escanear el QR
+                        que te proporcionó tu establecimiento (incluye el identificador de la marca).
+                    </p>
+                    <p className="text-muted" style={{ fontSize: '0.8rem', marginTop: 12 }}>
+                        Formato correcto: <code>/register?tenant=tu-negocio</code>
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     if (result) {
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
                       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -85,7 +115,6 @@ const Register = () => {
                     </p>
                     
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {/* Apple Wallet — mostrar en iOS o siempre */}
                         {result.applePassUrl && (
                             <a 
                                 href={result.applePassUrl} 
@@ -107,7 +136,6 @@ const Register = () => {
                             </a>
                         )}
 
-                        {/* Google Wallet */}
                         {result.saveUrl && (
                             <a 
                                 href={result.saveUrl} 

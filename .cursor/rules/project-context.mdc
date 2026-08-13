@@ -1,0 +1,30 @@
+---
+description: Contexto obligatorio del monorepo SW Loyalty — leer as-built antes de explorar
+alwaysApply: true
+---
+
+# SW Loyalty — contexto del proyecto
+
+Antes de explorar el monorepo completo, lee **`docs/00-ESTADO-ACTUAL.md`**. Es la fuente de verdad as-built.
+
+## Hechos que no debes asumir del README antiguo
+
+- Stack real: **Vite + React** (frontend/admin) + **Express** (backend) + **Supabase** — **no** Next.js.
+- Ya es **multi-tenant** con Super Admin (`admin_users` + JWT propio, no Supabase Auth).
+- Docs `docs/01`–`06` son roadmap/histórico; contrastar con el as-built antes de implementarlos.
+
+## Mapa rápido
+
+| App | Carpeta | Puerto local |
+|-----|---------|--------------|
+| API | `backend/` | 3000 |
+| Staff/registro/beneficios | `frontend/` | 5173 |
+| Admin + Super Admin | `admin/` | 5174 |
+| Print Bridge | `print-bridge/` | 4001 HTTPS |
+
+## Al cambiar código
+
+- Filtrar siempre por `tenant_id` (service role bypassa RLS).
+- Endpoints admin → `admin-routes.js`; plataforma → `super-admin-routes.js`; público/staff → `index.js`.
+- Impresión en local → Print Bridge `:4001`, no TCP desde Vercel a LAN.
+- Tras cambios estructurales (API, BD, apps), **actualizar** `docs/00-ESTADO-ACTUAL.md`.

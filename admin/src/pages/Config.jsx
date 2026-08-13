@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react'
-import { Settings, Save, Printer, RefreshCw } from 'lucide-react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { Settings, Save, Printer, RefreshCw, QrCode, Copy, Download, Link2 } from 'lucide-react'
+import QRCode from 'qrcode'
 import api from '../api'
+
+const STAFF_PORTAL_URL = (import.meta.env.VITE_STAFF_PORTAL_URL || 'https://loyalty-staff.vercel.app').replace(/\/$/, '')
 
 const Config = () => {
   const [config, setConfig] = useState({ points_per_visit: 10, program_name: 'Loyalty PANEM', cycle_visits_required: 10, cycle_reward_perk_id: null })
@@ -8,11 +11,56 @@ const Config = () => {
   const [perks, setPerks] = useState([])
   const [cycleError, setCycleError] = useState('')
   const [adminForm, setAdminForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
+  const [qrDataUrl, setQrDataUrl] = useState('')
+  const [copied, setCopied] = useState(false)
+  const printRef = useRef(null)
+
+  const tenantSlug = useMemo(() => {
+    try {
+      const fromStorage = localStorage.getItem('tenant_slug')
+      if (fromStorage) return fromStorage.trim().toLowerCase()
+      const tenant = JSON.parse(localStorage.getItem('tenant_data') || 'null')
+      return (tenant?.slug || '').trim().toLowerCase()
+    } catch {
+      return ''
+    }
+  }, [])
+
+  const tenantName = useMemo(() => {
+    try {
+      const tenant = JSON.parse(localStorage.getItem('tenant_data') || 'null')
+      return tenant?.name || config.program_name || tenantSlug
+    } catch {
+      return config.program_name || tenantSlug
+    }
+  }, [config.program_name, tenantSlug])
+
+  const registerUrl = tenantSlug
+    ? `${STAFF_PORTAL_URL}/register?tenant=${encodeURIComponent(tenantSlug)}`
+    : ''
 
   useEffect(() => {
     loadConfig()
     loadPerks()
   }, [])
+
+  useEffect(() => {
+    if (!registerUrl) {
+      setQrDataUrl('')
+      return
+    }
+    QRCode.toDataURL(registerUrl, {
+      width: 512,
+      margin: 2,
+      color: { dark: '#0F172A', light: '#FFFFFF' },
+      errorCorrectionLevel: 'M'
+    })
+      .then(setQrDataUrl)
+      .catch((err) => {
+        console.error(err)
+        setQrDataUrl('')
+      })
+  }, [registerUrl])
 
   const loadConfig = async () => {
     try {
@@ -71,10 +119,135 @@ const Config = () => {
     }
   }
 
+  const copyRegisterLink = async () => {
+    if (!registerUrl) return
+    try {
+      await navigator.clipboard.writeText(registerUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      prompt('Copia este enlace:', registerUrl)
+    }
+  }
+
+  const downloadQr = () => {
+    if (!qrDataUrl || !tenantSlug) return
+    const a = document.createElement('a')
+    a.href = qrDataUrl
+    a.download = `registro-${tenantSlug}-qr.png`
+    a.click()
+  }
+
+  const escapeHtml = (value) =>
+    String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+
+  const printQr = () => {
+    if (!qrDataUrl) return
+    const win = window.open('', '_blank', 'noopener,noreferrer,width=640,height=800')
+    if (!win) {
+      alert('Permite ventanas emergentes para imprimir el QR')
+      return
+    }
+    const safeName = escapeHtml(tenantName)
+    const safeUrl = escapeHtml(registerUrl)
+    win.document.write(`<!DOCTYPE html>
+<html><head><title>QR Registro — ${safeName}</title>
+<style>
+  body { font-family: system-ui, sans-serif; text-align: center; padding: 40px; color: #0f172a; }
+  h1 { font-size: 1.5rem; margin-bottom: 8px; }
+  p { color: #64748b; margin: 8px 0; }
+  img { width: 360px; height: 360px; margin: 24px 0; }
+  .url { font-size: 0.85rem; word-break: break-all; }
+</style></head><body>
+  <h1>${safeName}</h1>
+  <p>Escanea para registrarte en el programa de lealtad</p>
+  <img src="${qrDataUrl}" alt="QR de registro" />
+  <p class="url">${safeUrl}</p>
+  <script>window.onload = () => { window.print(); }</script>
+</body></html>`)
+    win.document.close()
+  }
+
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">Configuración</h1>
+      </div>
+
+      {/* QR / Link de registro público */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">
+            <QrCode size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+            Registro de clientes (QR público)
+          </h3>
+        </div>
+        {!tenantSlug ? (
+          <p className="text-muted" style={{ fontSize: '0.85rem' }}>
+            No se encontró el slug del negocio en la sesión. Cierra sesión e inicia de nuevo con el campo Negocio.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
+            <div
+              ref={printRef}
+              style={{
+                background: '#fff',
+                padding: 16,
+                borderRadius: 12,
+                display: 'inline-flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 8
+              }}
+            >
+              {qrDataUrl ? (
+                <img src={qrDataUrl} alt={`QR registro ${tenantSlug}`} width={220} height={220} />
+              ) : (
+                <div style={{ width: 220, height: 220, display: 'grid', placeItems: 'center', color: '#64748b' }}>
+                  Generando QR…
+                </div>
+              )}
+              <span style={{ color: '#0f172a', fontWeight: 600, fontSize: '0.9rem' }}>{tenantName}</span>
+            </div>
+
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: 12 }}>
+                Cada marca tiene su propio enlace con <code>?tenant={tenantSlug}</code>.
+                Imprime o descarga este QR para el mostrador; así los clientes no se mezclan entre negocios.
+              </p>
+
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Link2 size={14} /> Enlace de registro
+              </label>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  readOnly
+                  value={registerUrl}
+                  style={{ flex: 1, minWidth: 200 }}
+                  onFocus={(e) => e.target.select()}
+                />
+                <button type="button" className="btn btn-ghost" onClick={copyRegisterLink}>
+                  <Copy size={16} /> {copied ? 'Copiado' : 'Copiar'}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-primary" onClick={downloadQr} disabled={!qrDataUrl}>
+                  <Download size={16} /> Descargar PNG
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={printQr} disabled={!qrDataUrl}>
+                  <Printer size={16} /> Imprimir QR
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Configuración del programa */}
@@ -95,7 +268,6 @@ const Config = () => {
             </div>
           </div>
 
-          {/* Configuración del Ciclo de Visitas */}
           <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.5rem', paddingTop: '1.5rem' }}>
             <h4 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
               <RefreshCw size={16} /> Ciclo de Visitas
@@ -184,4 +356,3 @@ const Config = () => {
 }
 
 export default Config
-

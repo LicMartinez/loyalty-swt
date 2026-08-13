@@ -126,16 +126,24 @@ app.get('/api/customers/:id/apple-pass', async (req, res) => {
 app.post('/api/customers', async (req, res) => {
     const { name, email, phone, birthday, tenant_slug } = req.body;
 
-    // Resolver tenant (desde body o default a PANEM)
-    const slug = tenant_slug || 'panem';
+    // tenant_slug obligatorio — evita mezclar clientes entre marcas (no hay default a panem)
+    const slug = typeof tenant_slug === 'string' ? tenant_slug.trim().toLowerCase() : '';
+    if (!slug) {
+        return res.status(400).json({ error: 'Falta el identificador del negocio (tenant_slug). Usa el link o QR de registro de tu marca.' });
+    }
+
     const { data: tenant, error: tenantErr } = await supabase
         .from('tenants')
-        .select('id, wallet_class_id, wallet_issuer_name, wallet_program_name, wallet_bg_color, wallet_logo_url')
+        .select('id, slug, name, is_active, wallet_class_id, wallet_issuer_name, wallet_program_name, wallet_bg_color, wallet_logo_url')
         .eq('slug', slug)
         .single();
 
     if (tenantErr || !tenant) {
         return res.status(400).json({ error: 'Negocio no encontrado' });
+    }
+
+    if (tenant.is_active === false) {
+        return res.status(403).json({ error: 'Este programa de lealtad no está activo' });
     }
 
     // === VALIDACIÓN DE DATOS ===

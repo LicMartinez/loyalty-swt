@@ -1,7 +1,7 @@
 # SW Loyalty — Estado Actual del Proyecto (As-Built)
 
-> **Fuente de verdad técnica.** Léela antes de explorar el código.
-> Última actualización: 2026-08-12  
+> **Fuente de verdad técnica.** Léela antes de explorar el código.  
+> Última actualización: 2026-08-14  
 > Estado: **plataforma multi-tenant operativa** (Vite + Express + Supabase), no el MVP single-tenant ni el plan Next.js de docs antiguas.
 
 ---
@@ -166,13 +166,15 @@ Si no → Layout + rutas de marca:
 | `/reports` | Reportes |
 | `/tiers` | Niveles |
 | `/printers` | Impresoras (BD) |
-| `/config` | Config programa + password |
+| `/config` | Config programa + branding Wallet (iOS/Android) + password |
 
 Cliente HTTP: `admin/src/api.js` → base `/api/admin` + Bearer `admin_token`.
 
 ### 7.3 Branding UI
 
-Campos de branding existen en tabla `tenants`, pero **las UIs no aplican CSS/logo dinámico**. Colores fijos en CSS. Tickets en `frontend/src/utils/printer.js` aún hardcodean nombre `PANEM` en varios strings.
+La **tarjeta Wallet** sí se personaliza por tenant (Admin → Configuración → Tarjeta Wallet): logo, banner iOS (`strip`), icono, colores y nombres. Se guarda en `tenants.wallet_*` y, al generar el `.pkpass`, se embebe en el pase.
+
+El resto de UIs (staff/admin CSS, tickets térmicos) **aún no** aplican branding dinámico. Tickets en `frontend/src/utils/printer.js` aún hardcodean nombre `PANEM` en varios strings.
 
 ---
 
@@ -199,7 +201,7 @@ Rate limit login: 5 / 15 min. API general: 100 / min.
 
 ### Admin — `/api/admin` (`admin-routes.js`) — `owner`\|`admin`\|`staff`
 
-Áreas: `stats`, `birthdays`, `checkins/recent`, `customers` (+ export, tier), `gifts`, `perks`, `promotions`, `config`, `reports/*`, `tiers`, `printers` (+ test).
+Áreas: `stats`, `birthdays`, `checkins/recent`, `customers` (+ export, tier), `gifts`, `perks`, `promotions`, `config`, `branding` (+ upload imagen), `reports/*`, `tiers`, `printers` (+ test).
 
 Todas filtran por `req.tenantId` del JWT.
 
@@ -213,7 +215,7 @@ Todas filtran por `req.tenantId` del JWT.
 | GET | `/api/customers/:id` | Perfil |
 | GET | `/api/customers/:id/benefits` | Portal cliente |
 | GET | `/api/customers/:id/progress` | Sellos/ciclo |
-| GET | `/api/customers/:id/apple-pass` | Descarga `.pkpass` |
+| GET | `/api/customers/:id/apple-pass` | Descarga `.pkpass` con logo/strip/colores del tenant |
 | POST | `/api/checkin` | Visita + puntos + ciclo |
 | POST | `/api/redemption` | Canje por puntos |
 | POST | `/api/redemption/gift` | Canje cortesía pendiente |
@@ -234,7 +236,7 @@ Fuentes de schema: scripts en `backend/migrate.js`, `backend/run_migration.js`, 
 
 | Tabla | Rol |
 |-------|-----|
-| `tenants` | Marcas: slug, name, branding, wallet_* |
+| `tenants` | Marcas: slug, name, branding, wallet_* (incl. strip/icon/fg/label) |
 | `admin_users` | Usuarios plataforma/marca (`tenant_id` NULL = super) |
 | `customers` | Clientes: puntos, visitas, `tier_id`, ciclo, `wallet_pass_id` |
 | `loyalty_tiers` | Niveles por tenant (`points_per_visit`, `is_default`) |
@@ -299,7 +301,7 @@ Servicio Windows: `print-bridge/install-service.js` / `uninstall-service.js`.
 | `tier-engine.js` | Niveles y puntos |
 | `cycle-engine.js` | Sellos / ciclos |
 | `wallet.js` | Google Wallet |
-| `apple-wallet.js` | Generación `.pkpass` |
+| `apple-wallet.js` | Generación `.pkpass` con branding por tenant (logo, strip, colores) |
 | `print-service.js` | ESC/POS multi-printer |
 
 Certificados Apple esperados en `backend/certs/` (`signerCert.pem`, `signerKey.pem`, `wwdr.pem`, `icon.png`).
@@ -338,6 +340,7 @@ Credenciales de negocio y secrets: `backend/.env` (no commitear). Uso humano: ve
 | `002_...` | Columnas ciclo/tier en customers |
 | `003_...` | Config de ciclo en loyalty_config |
 | `004_...` | `tier_change_history` + `cycle_rewards` + RLS |
+| `005_apple_wallet_branding.js` | `wallet_strip_url`, `wallet_icon_url`, `wallet_fg_color`, `wallet_label_color` + bucket `tenant-branding` |
 
 Runner: intentan RPC/`exec_sql`; si fallan imprimen SQL para Dashboard. `npm run migrate` solo ejecuta el `001`.
 
@@ -349,6 +352,7 @@ Runner: intentan RPC/`exec_sql`; si fallan imprimen SQL para Dashboard. `npm run
 backend/tests/tier-engine.test.js
 backend/tests/cycle-engine.test.js
 backend/tests/wallet.test.js
+backend/tests/apple-wallet.test.js
 backend/tests/properties/setup.test.js
 ```
 
@@ -365,7 +369,7 @@ Comando: `cd backend && npm test`. Sin tests de integración HTTP.
 5. Insert de redención por puntos a veces omite `tenant_id`.
 6. Completar ciclo no genera `direct_gifts` canjeable; solo `cycle_rewards`.
 7. CRUD de `promotions` existe; **check-in no las aplica**.
-8. Apple Wallet: pass estático al descargar; **sin push/update** tras check-in.
+8. Apple Wallet: pass estático al descargar; **sin push/update** tras check-in. Un cambio de branding iOS exige volver a añadir la tarjeta.
 9. TCP print desde Vercel a LAN suele fallar → usar Print Bridge.
 10. Placeholder UI a veces dice puerto `3001`; el bridge real es **HTTPS 4001**.
 11. Docs `02-modelo-datos` hablan de `tenant_users` + Supabase Auth — **implementado** es `admin_users` + JWT.
@@ -382,7 +386,7 @@ Comando: `cd backend && npm test`. Sin tests de integración HTTP.
 | Tiers + ciclos | **Hecho** |
 | Impresoras multi + Print Bridge | **Hecho** |
 | Google + Apple Wallet (alta) | **Hecho** (Apple sin updates) |
-| Branding visual por tenant | **No** (solo columnas BD) |
+| Branding visual por tenant | **Parcial**: Wallet iOS/Android sí (Admin → Configuración). CSS de apps y tickets aún no |
 | Migración a Next.js | **No** (sigue Vite+Express) |
 | Transferencia puntos entre clientes | **No** (solo doc `04-transfer-...`) |
 | Promociones en check-in | **No** |

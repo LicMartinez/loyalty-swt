@@ -403,6 +403,45 @@ async function checkStatus() {
     return result;
 }
 
+/**
+ * Actualiza branding de una Loyalty Class existente (logo, colores, nombres).
+ * Los pases Android ya emitidos heredan la clase; iOS no (el .pkpass es estático).
+ */
+async function updateLoyaltyClassBranding(tenantConfig) {
+    const classId = tenantConfig?.wallet_class_id || CLASS_ID;
+    if (!classId || !credentials) return;
+
+    const url = `https://walletobjects.googleapis.com/walletobjects/v1/loyaltyClass/${classId}`;
+    const patchBody = {
+        issuerName: tenantConfig.wallet_issuer_name || 'Loyalty',
+        programName: tenantConfig.wallet_program_name || 'Loyalty Program',
+        hexBackgroundColor: tenantConfig.wallet_bg_color || '#1a1a2e',
+    };
+    if (tenantConfig.wallet_logo_url) {
+        patchBody.programLogo = {
+            sourceUri: { uri: tenantConfig.wallet_logo_url },
+            contentDescription: {
+                defaultValue: {
+                    language: 'es-MX',
+                    value: `${tenantConfig.wallet_issuer_name || 'Loyalty'} Logo`,
+                },
+            },
+        };
+    }
+
+    try {
+        await client.request({ url, method: 'PATCH', data: patchBody });
+        console.log(`[wallet] Loyalty Class ${classId} branding actualizado.`);
+    } catch (error) {
+        if (error.response?.status === 404) {
+            verifiedClasses.delete(classId);
+            await ensureLoyaltyClassExists(tenantConfig);
+            return;
+        }
+        console.error('[wallet] Error actualizando branding de clase:', error.response?.data || error.message);
+    }
+}
+
 module.exports = {
     createWalletPass,
     createWalletPassJWT,
@@ -410,5 +449,6 @@ module.exports = {
     updateWalletPassOnTierChange,
     updateWithRetry,
     checkStatus,
-    ensureLoyaltyClassExists
+    ensureLoyaltyClassExists,
+    updateLoyaltyClassBranding,
 };

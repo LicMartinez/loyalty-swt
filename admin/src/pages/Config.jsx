@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
-import { Settings, Save, Printer, RefreshCw, QrCode, Copy, Download, Link2 } from 'lucide-react'
+import { Settings, Save, Printer, RefreshCw, QrCode, Copy, Download, Link2, Wallet, Image } from 'lucide-react'
 import QRCode from 'qrcode'
 import api from '../api'
 
@@ -14,6 +14,19 @@ const Config = () => {
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [copied, setCopied] = useState(false)
   const printRef = useRef(null)
+  const [branding, setBranding] = useState({
+    wallet_program_name: '',
+    wallet_issuer_name: '',
+    wallet_bg_color: '#1a1a2e',
+    wallet_fg_color: '',
+    wallet_label_color: '',
+    wallet_logo_url: '',
+    wallet_strip_url: '',
+    wallet_icon_url: ''
+  })
+  const [brandingSaved, setBrandingSaved] = useState(false)
+  const [brandingError, setBrandingError] = useState('')
+  const [uploadingKind, setUploadingKind] = useState('')
 
   const tenantSlug = useMemo(() => {
     try {
@@ -42,6 +55,7 @@ const Config = () => {
   useEffect(() => {
     loadConfig()
     loadPerks()
+    loadBranding()
   }, [])
 
   useEffect(() => {
@@ -74,6 +88,85 @@ const Config = () => {
       const res = await api.get('/perks')
       setPerks(res.data)
     } catch (err) { console.error(err) }
+  }
+
+  const loadBranding = async () => {
+    try {
+      const res = await api.get('/branding')
+      setBranding((prev) => ({
+        ...prev,
+        ...res.data,
+        wallet_bg_color: res.data.wallet_bg_color || '#1a1a2e',
+        wallet_program_name: res.data.wallet_program_name || '',
+        wallet_issuer_name: res.data.wallet_issuer_name || res.data.name || ''
+      }))
+    } catch (err) { console.error(err) }
+  }
+
+  const previewColors = (() => {
+    const hex = String(branding.wallet_bg_color || '#1a1a2e').replace('#', '')
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+      return { fg: branding.wallet_fg_color || '#ffffff', label: branding.wallet_label_color || '#cbd5e1' }
+    }
+    const r = parseInt(hex.slice(0, 2), 16)
+    const g = parseInt(hex.slice(2, 4), 16)
+    const b = parseInt(hex.slice(4, 6), 16)
+    const lin = (c) => {
+      const s = c / 255
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+    }
+    const light = (0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)) > 0.45
+    return {
+      fg: branding.wallet_fg_color || (light ? '#0f172a' : '#ffffff'),
+      label: branding.wallet_label_color || (light ? '#475569' : '#cbd5e1')
+    }
+  })()
+
+  const saveBranding = async (e) => {
+    e.preventDefault()
+    setBrandingError('')
+    try {
+      const res = await api.put('/branding', {
+        wallet_program_name: branding.wallet_program_name,
+        wallet_issuer_name: branding.wallet_issuer_name,
+        wallet_bg_color: branding.wallet_bg_color,
+        wallet_fg_color: branding.wallet_fg_color || null,
+        wallet_label_color: branding.wallet_label_color || null
+      })
+      setBranding((prev) => ({ ...prev, ...res.data }))
+      setBrandingSaved(true)
+      setTimeout(() => setBrandingSaved(false), 3000)
+    } catch (err) {
+      setBrandingError(err.response?.data?.error || 'Error al guardar branding')
+    }
+  }
+
+  const uploadBrandingImage = async (kind, file) => {
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      setBrandingError('La imagen no puede superar 2 MB')
+      return
+    }
+    setBrandingError('')
+    setUploadingKind(kind)
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      const res = await api.post('/branding/image', {
+        kind,
+        contentType: file.type,
+        data: dataUrl
+      })
+      setBranding((prev) => ({ ...prev, ...res.data.tenant }))
+    } catch (err) {
+      setBrandingError(err.response?.data?.error || 'Error al subir la imagen')
+    } finally {
+      setUploadingKind('')
+    }
   }
 
   const handleCycleVisitsChange = (e) => {
@@ -248,6 +341,182 @@ const Config = () => {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Branding de la tarjeta Wallet (iOS / Android) */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">
+            <Wallet size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+            Tarjeta Wallet (iOS y Android)
+          </h3>
+          {brandingSaved && <span className="badge badge-success">Guardado ✓</span>}
+        </div>
+        <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: 16 }}>
+          Apple Wallet usa una plantilla fija (no se puede clonar el layout de Android), pero cada marca
+          puede definir logo, banner, colores y nombre. El preview de la derecha se parece a iOS.
+          Los pases iOS ya descargados no se actualizan solos: el cliente debe volver a añadir la tarjeta.
+        </p>
+
+        <form onSubmit={saveBranding}>
+          <div className="wallet-branding-grid">
+            <div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Nombre del programa</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    maxLength={80}
+                    value={branding.wallet_program_name}
+                    onChange={(e) => setBranding({ ...branding, wallet_program_name: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Nombre de la marca (emisor)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    maxLength={80}
+                    value={branding.wallet_issuer_name}
+                    onChange={(e) => setBranding({ ...branding, wallet_issuer_name: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                <div className="form-group">
+                  <label className="form-label">Color de fondo</label>
+                  <input
+                    type="color"
+                    className="form-input"
+                    style={{ height: 44, padding: 4 }}
+                    value={/^#[0-9a-fA-F]{6}$/.test(branding.wallet_bg_color) ? branding.wallet_bg_color : '#1a1a2e'}
+                    onChange={(e) => setBranding({ ...branding, wallet_bg_color: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Texto (opcional)</label>
+                  <input
+                    type="color"
+                    className="form-input"
+                    style={{ height: 44, padding: 4 }}
+                    value={/^#[0-9a-fA-F]{6}$/.test(branding.wallet_fg_color) ? branding.wallet_fg_color : previewColors.fg}
+                    onChange={(e) => setBranding({ ...branding, wallet_fg_color: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Etiquetas (opcional)</label>
+                  <input
+                    type="color"
+                    className="form-input"
+                    style={{ height: 44, padding: 4 }}
+                    value={/^#[0-9a-fA-F]{6}$/.test(branding.wallet_label_color) ? branding.wallet_label_color : previewColors.label}
+                    onChange={(e) => setBranding({ ...branding, wallet_label_color: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  <Image size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                  Logo (PNG, ~320×100 o cuadrado)
+                </label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  className="form-input"
+                  disabled={uploadingKind === 'logo'}
+                  onChange={(e) => uploadBrandingImage('logo', e.target.files?.[0])}
+                />
+                {branding.wallet_logo_url && (
+                  <span className="text-muted" style={{ fontSize: '0.75rem' }}>Logo cargado</span>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Banner / strip iOS (PNG, recomendado 750×246)</label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  className="form-input"
+                  disabled={uploadingKind === 'strip'}
+                  onChange={(e) => uploadBrandingImage('strip', e.target.files?.[0])}
+                />
+                <span className="text-muted" style={{ fontSize: '0.75rem' }}>
+                  Si no subes banner, se genera un degradado con el color de fondo.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Ícono notificaciones (PNG, ~87×87, opcional)</label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  className="form-input"
+                  disabled={uploadingKind === 'icon'}
+                  onChange={(e) => uploadBrandingImage('icon', e.target.files?.[0])}
+                />
+              </div>
+
+              {brandingError && <p className="field-error">{brandingError}</p>}
+              {uploadingKind && <p className="text-muted" style={{ fontSize: '0.8rem' }}>Subiendo {uploadingKind}…</p>}
+
+              <button type="submit" className="btn btn-primary" style={{ marginTop: 8 }}>
+                <Save size={16} /> Guardar apariencia
+              </button>
+            </div>
+
+            <div className="pass-preview-wrap">
+              <span className="text-muted" style={{ fontSize: '0.75rem', display: 'block', marginBottom: 8 }}>
+                Preview iOS (aproximado)
+              </span>
+              <div
+                className="pass-preview"
+                style={{
+                  background: branding.wallet_bg_color || '#1a1a2e',
+                  color: previewColors.fg
+                }}
+              >
+                <div className="pass-preview-header">
+                  <div className="pass-preview-brand">
+                    {(branding.wallet_logo_url || branding.wallet_icon_url) && (
+                      <img
+                        src={branding.wallet_logo_url || branding.wallet_icon_url}
+                        alt=""
+                        className="pass-preview-logo"
+                      />
+                    )}
+                    <span>{branding.wallet_program_name || tenantName || 'Loyalty'}</span>
+                  </div>
+                  <div className="pass-preview-points">
+                    <span style={{ color: previewColors.label }}>PUNTOS</span>
+                    <strong>0</strong>
+                  </div>
+                </div>
+                <div
+                  className="pass-preview-strip"
+                  style={branding.wallet_strip_url
+                    ? { backgroundImage: `url(${branding.wallet_strip_url})` }
+                    : { background: `linear-gradient(180deg, color-mix(in srgb, ${branding.wallet_bg_color || '#1a1a2e'} 55%, #000) 0%, ${branding.wallet_bg_color || '#1a1a2e'} 100%)` }}
+                />
+                <div className="pass-preview-name">Cliente Demo</div>
+                <div className="pass-preview-label" style={{ color: previewColors.label }}>CLIENTE</div>
+                <div className="pass-preview-meta">
+                  <div>
+                    <div className="pass-preview-label" style={{ color: previewColors.label }}>NIVEL</div>
+                    <div>Bronce</div>
+                  </div>
+                  <div>
+                    <div className="pass-preview-label" style={{ color: previewColors.label }}>VISITAS</div>
+                    <div>0/10</div>
+                  </div>
+                </div>
+                <div className="pass-preview-qr">QR</div>
+              </div>
+            </div>
+          </div>
+        </form>
       </div>
 
       {/* Configuración del programa */}

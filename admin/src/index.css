@@ -308,6 +308,112 @@ tr:hover td {
   gap: 16px;
 }
 
+.wallet-branding-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 28px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .wallet-branding-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pass-preview-wrap {
+  position: sticky;
+  top: 24px;
+}
+
+.pass-preview {
+  width: 260px;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  padding-bottom: 16px;
+}
+
+.pass-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 14px 14px 8px;
+  gap: 8px;
+}
+
+.pass-preview-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.pass-preview-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.pass-preview-points {
+  text-align: right;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+
+.pass-preview-points strong {
+  display: block;
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.pass-preview-strip {
+  height: 72px;
+  margin: 4px 0 10px;
+  background-size: cover;
+  background-position: center;
+}
+
+.pass-preview-name {
+  font-size: 1.35rem;
+  font-weight: 700;
+  padding: 0 14px;
+  line-height: 1.15;
+}
+
+.pass-preview-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 14px;
+  margin-top: 2px;
+}
+
+.pass-preview-meta {
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 14px 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.pass-preview-qr {
+  margin: 16px 14px 0;
+  height: 88px;
+  border-radius: 8px;
+  background: #fff;
+  color: #94a3b8;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+}
+
 /* Badges */
 .badge {
   display: inline-flex;

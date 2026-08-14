@@ -27,7 +27,7 @@ const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: { er
 app.use('/api/', apiLimiter);
 app.use('/api/auth/login', loginLimiter);
 
-app.use(express.json());
+app.use(express.json({ limit: '3mb' }));
 
 // Supabase Client Initialization
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -89,24 +89,35 @@ app.get('/api/customers/:id/apple-pass', async (req, res) => {
         // Obtener cliente y tenant info
         const { data: customer, error } = await supabase
             .from('customers')
-            .select('id, name, tenant_id, points_balance, cycle_visits_count, tier_id')
+            .select('id, name, tenant_id, points_balance, cycle_visits_count, tier_id, loyalty_tiers(name)')
             .eq('id', customerId)
             .single();
 
         if (error || !customer) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-        // Obtener info del tenant
-        const { data: tenant } = await supabase
-            .from('tenants')
-            .select('name, wallet_program_name, wallet_bg_color, wallet_issuer_name, wallet_logo_url')
-            .eq('id', customer.tenant_id)
-            .single();
+        const [{ data: tenant }, { data: loyaltyConfig }] = await Promise.all([
+            supabase
+                .from('tenants')
+                .select('slug, name, wallet_program_name, wallet_bg_color, wallet_issuer_name, wallet_logo_url, wallet_strip_url, wallet_icon_url, wallet_fg_color, wallet_label_color')
+                .eq('id', customer.tenant_id)
+                .single(),
+            supabase
+                .from('loyalty_config')
+                .select('cycle_visits_required')
+                .eq('tenant_id', customer.tenant_id)
+                .single(),
+        ]);
 
-        // Generar .pkpass
+        const visitsRequired = loyaltyConfig?.cycle_visits_required || 10;
+        const visitsDone = customer.cycle_visits_count || 0;
+
         const passBuffer = await appleWallet.createApplePass({
             customerId: customer.id,
             customerName: customer.name,
-            tenant
+            tenant,
+            points: customer.points_balance || 0,
+            visitsProgress: `${visitsDone}/${visitsRequired}`,
+            tierName: customer.loyalty_tiers?.name || 'Bronce',
         });
 
         res.set({
@@ -134,7 +145,7 @@ app.post('/api/customers', async (req, res) => {
 
     const { data: tenant, error: tenantErr } = await supabase
         .from('tenants')
-        .select('id, slug, name, is_active, wallet_class_id, wallet_issuer_name, wallet_program_name, wallet_bg_color, wallet_logo_url')
+        .select('id, slug, name, is_active, wallet_class_id, wallet_issuer_name, wallet_program_name, wallet_bg_color, wallet_logo_url, wallet_strip_url, wallet_icon_url, wallet_fg_color, wallet_label_color')
         .eq('slug', slug)
         .single();
 

@@ -332,7 +332,169 @@ router.put('/config', adminAuth, async (req, res) => {
             .select()
             .single();
         if (error) throw error;
+
+        if (program_name !== undefined) {
+            await supabase.from('tenants')
+                .update({ wallet_program_name: program_name, updated_at: new Date().toISOString() })
+                .eq('id', req.tenantId);
+        }
+
         res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============ WALLET BRANDING ============
+
+const HEX_COLOR = /^#?[0-9a-fA-F]{6}$/;
+const BRANDING_BUCKET = 'tenant-branding';
+
+function normalizeHex(value) {
+    if (value == null || value === '') return null;
+    const v = String(value).trim();
+    if (!HEX_COLOR.test(v)) return undefined;
+    return v.startsWith('#') ? v : `#${v}`;
+}
+
+async function ensureBrandingBucket(supabase) {
+    const { data } = await supabase.storage.getBucket(BRANDING_BUCKET);
+    if (data) return;
+    const { error } = await supabase.storage.createBucket(BRANDING_BUCKET, {
+        public: true,
+        fileSizeLimit: '2097152',
+        allowedMimeTypes: ['image/png', 'image/jpeg'],
+    });
+    if (error && !/already exists/i.test(error.message || '')) {
+        throw error;
+    }
+}
+
+router.get('/branding', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    try {
+        const { data, error } = await supabase.from('tenants')
+            .select('id, slug, name, logo_url, wallet_program_name, wallet_issuer_name, wallet_bg_color, wallet_fg_color, wallet_label_color, wallet_logo_url, wallet_strip_url, wallet_icon_url')
+            .eq('id', req.tenantId)
+            .single();
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.put('/branding', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    try {
+        const update = { updated_at: new Date().toISOString() };
+
+        for (const field of ['wallet_program_name', 'wallet_issuer_name']) {
+            if (req.body[field] !== undefined) {
+                const val = String(req.body[field] || '').trim();
+                if (val.length > 80) {
+                    return res.status(400).json({ error: `${field} máximo 80 caracteres` });
+                }
+                update[field] = val || null;
+            }
+        }
+
+        for (const field of ['wallet_bg_color', 'wallet_fg_color', 'wallet_label_color']) {
+            if (req.body[field] !== undefined) {
+                if (req.body[field] === '' || req.body[field] === null) {
+                    update[field] = null;
+                    continue;
+                }
+                const hex = normalizeHex(req.body[field]);
+                if (hex === undefined) {
+                    return res.status(400).json({ error: `${field} debe ser un color hex (#RRGGBB)` });
+                }
+                update[field] = hex;
+            }
+        }
+
+        for (const field of ['wallet_logo_url', 'wallet_strip_url', 'wallet_icon_url']) {
+            if (req.body[field] !== undefined) {
+                const url = String(req.body[field] || '').trim();
+                if (url && !/^https?:\/\//i.test(url)) {
+                    return res.status(400).json({ error: `${field} debe ser una URL http(s)` });
+                }
+                update[field] = url || null;
+            }
+        }
+
+        const { data, error } = await supabase.from('tenants')
+            .update(update)
+            .eq('id', req.tenantId)
+            .select('id, slug, name, logo_url, wallet_program_name, wallet_issuer_name, wallet_bg_color, wallet_fg_color, wallet_label_color, wallet_logo_url, wallet_strip_url, wallet_icon_url, wallet_class_id')
+            .single();
+        if (error) throw error;
+
+        if (update.wallet_program_name) {
+            await supabase.from('loyalty_config')
+                .update({ program_name: update.wallet_program_name, updated_at: update.updated_at })
+                .eq('tenant_id', req.tenantId);
+        }
+
+        const wallet = require('./wallet');
+        wallet.updateLoyaltyClassBranding(data).catch(() => {});
+
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.post('/branding/image', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    const { kind, contentType, data } = req.body || {};
+    const allowedKind = { logo: 'wallet_logo_url', strip: 'wallet_strip_url', icon: 'wallet_icon_url' };
+    const column = allowedKind[kind];
+    if (!column) {
+        return res.status(400).json({ error: 'kind debe ser logo, strip o icon' });
+    }
+    if (!data || typeof data !== 'string') {
+        return res.status(400).json({ error: 'Falta el archivo (data base64)' });
+    }
+    const mime = String(contentType || '').toLowerCase();
+    const ext = mime.includes('png') ? 'png' : (mime.includes('jpeg') || mime.includes('jpg') ? 'jpg' : null);
+    if (!ext) {
+        return res.status(400).json({ error: 'Solo se aceptan PNG o JPEG' });
+    }
+
+    const base64 = data.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
+    let buffer;
+    try {
+        buffer = Buffer.from(base64, 'base64');
+    } catch {
+        return res.status(400).json({ error: 'Base64 inválido' });
+    }
+    if (buffer.length < 24 || buffer.length > 2 * 1024 * 1024) {
+        return res.status(400).json({ error: 'La imagen debe pesar entre 24 bytes y 2 MB' });
+    }
+
+    try {
+        await ensureBrandingBucket(supabase);
+        const pathName = `${req.tenantId}/${kind}.${ext}`;
+        const { error: upErr } = await supabase.storage
+            .from(BRANDING_BUCKET)
+            .upload(pathName, buffer, { contentType: mime, upsert: true });
+        if (upErr) throw upErr;
+
+        const { data: pub } = supabase.storage.from(BRANDING_BUCKET).getPublicUrl(pathName);
+        const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+        const { data: tenant, error } = await supabase.from('tenants')
+            .update({ [column]: publicUrl, updated_at: new Date().toISOString() })
+            .eq('id', req.tenantId)
+            .select('id, slug, name, wallet_program_name, wallet_issuer_name, wallet_bg_color, wallet_fg_color, wallet_label_color, wallet_logo_url, wallet_strip_url, wallet_icon_url, wallet_class_id')
+            .single();
+        if (error) throw error;
+
+        const wallet = require('./wallet');
+        wallet.updateLoyaltyClassBranding(tenant).catch(() => {});
+
+        res.json({ url: publicUrl, tenant });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

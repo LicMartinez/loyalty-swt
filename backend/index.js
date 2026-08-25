@@ -409,6 +409,137 @@ app.get('/api/customers/:id/progress', async (req, res) => {
 });
 
 // 3. Endpoint: Check-in (Visita) — Refactorizado con tier-engine y cycle-engine
+// 3b. Kiosk optimized endpoint: check-in + profile in single request
+app.post('/api/checkin/kiosk', async (req, res) => {
+    const { customerId, scannedBy, tenant_slug } = req.body;
+
+    try {
+        // 1. Get customer
+        const { data: customer, error: fetchErr } = await supabase
+            .from('customers')
+            .select('id, name, visits_count, points_balance, cycle_visits_count, cycles_completed, tier_id, tenant_id')
+            .eq('id', customerId)
+            .single();
+
+        if (fetchErr || !customer) {
+            return res.status(404).json({ error: 'Cliente no encontrado' });
+        }
+
+        // Tenant isolation
+        if (tenant_slug) {
+            const { data: staffTenant } = await supabase
+                .from('tenants').select('id').eq('slug', tenant_slug).single();
+            if (staffTenant && customer.tenant_id !== staffTenant.id) {
+                return res.status(403).json({ error: 'Este cliente no pertenece a tu programa de lealtad' });
+            }
+        }
+
+        // 2. Check daily limit + get config in one query
+        const { data: config } = await supabase
+            .from('loyalty_config')
+            .select('max_checkins_per_day, cycle_visits_required, cycle_reward_perk_id')
+            .eq('tenant_id', customer.tenant_id)
+            .single();
+
+        const maxPerDay = config?.max_checkins_per_day ?? 1;
+        if (maxPerDay > 0) {
+            const today = new Date().toISOString().slice(0, 10);
+            const { count: todayCheckins } = await supabase
+                .from('checkins')
+                .select('id', { count: 'exact', head: true })
+                .eq('customer_id', customerId)
+                .gte('created_at', today);
+            if (todayCheckins >= maxPerDay) {
+                return res.status(429).json({ error: 'Límite de visitas alcanzado por hoy' });
+            }
+        }
+
+        // 3. Get tier
+        const { tier } = await getTierForCustomer(supabase, customerId);
+        const pointsEarned = calculatePoints(tier);
+
+        // 4. Perform check-in + update in parallel
+        const newVisits = customer.visits_count + 1;
+        const newPoints = customer.points_balance + pointsEarned;
+
+        const cycleConfig = {
+            cycle_visits_required: config?.cycle_visits_required || 10,
+            cycle_reward_perk_id: config?.cycle_reward_perk_id || null,
+        };
+
+        // Insert checkin + update customer in parallel
+        const [checkinRes, updateRes] = await Promise.all([
+            supabase.from('checkins')
+                .insert([{ tenant_id: customer.tenant_id, customer_id: customerId, scanned_by: scannedBy }])
+                .select('id').single(),
+            supabase.from('customers')
+                .update({ visits_count: newVisits, points_balance: newPoints })
+                .eq('id', customerId)
+        ]);
+
+        if (checkinRes.error) throw new Error('Error al registrar check-in');
+        if (updateRes.error) throw new Error('Error al actualizar cliente');
+
+        // 5. Process cycle
+        const cycleResult = await processCycleStep(supabase, customerId, cycleConfig);
+
+        // 6. Get perks + pending gifts in parallel (for display)
+        const [perksRes, giftsRes] = await Promise.all([
+            supabase.from('perks').select('id, name, description, cost_points')
+                .eq('tenant_id', customer.tenant_id).eq('is_active', true),
+            supabase.from('direct_gifts')
+                .select('id, perk_id, reason, created_at, perks(id, name, description)')
+                .eq('customer_id', customerId).eq('type', 'perk').is('redeemed_at', null)
+        ]);
+
+        // 7. Fire-and-forget: wallet update + auto-gift
+        const benefits = await getClientBenefits(customerId);
+        wallet.updateWalletPass(customerId, newVisits, newPoints, benefits, tier.name, {
+            visitsCompleted: cycleResult.newCycleVisitsCount,
+            visitsRequired: cycleConfig.cycle_visits_required
+        });
+
+        // Auto-gift for Platino
+        if (tier.benefit_description && tier.benefit_description.toLowerCase().includes('regalo')) {
+            supabase.from('direct_gifts').insert([{
+                tenant_id: customer.tenant_id,
+                customer_id: customerId,
+                type: 'perk',
+                reason: tier.benefit_description,
+                given_by: 'system',
+            }]).then(() => {}).catch(() => {});
+        }
+
+        // 8. Single response with everything the kiosk needs
+        res.json({
+            checkin: {
+                success: true,
+                visits: newVisits,
+                points: newPoints,
+                pointsEarned,
+                tierName: tier.name,
+                cycleProgress: {
+                    visitsCompleted: cycleResult.newCycleVisitsCount,
+                    visitsRequired: cycleConfig.cycle_visits_required,
+                },
+                cycleCompleted: cycleResult.completed,
+                rewardName: cycleResult.rewardName,
+            },
+            customer: {
+                id: customer.id,
+                name: customer.name,
+                visits_count: newVisits,
+                points_balance: newPoints,
+            },
+            perks: perksRes.data || [],
+            pendingGifts: giftsRes.data || [],
+        });
+    } catch (error) {
+        console.error('[KIOSK CHECKIN] Error:', error.message);
+        res.status(500).json({ error: 'Error en check-in' });
+    }
+});
+
 app.post('/api/checkin', async (req, res) => {
     const { customerId, scannedBy, tenant_slug } = req.body;
 

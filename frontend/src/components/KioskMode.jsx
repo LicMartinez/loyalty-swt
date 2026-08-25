@@ -11,7 +11,7 @@ const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') + '/api'
  * 
  * Flujo:
  * 1. Muestra escáner QR en pantalla completa
- * 2. Al escanear, ejecuta check-in automáticamente
+ * 2. Al escanear, ejecuta check-in automáticamente (single request)
  * 3. Muestra resultado (éxito + beneficios si hay)
  * 4. Si hay beneficios, muestra countdown configurable
  * 5. Regresa automáticamente al escáner al terminar el countdown
@@ -23,6 +23,8 @@ const KioskMode = ({ timeout = 20, onExit }) => {
     const [countdown, setCountdown] = useState(timeout);
     const [errorMsg, setErrorMsg] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+    // Track current points in local state for accurate display after redemptions
+    const [currentPoints, setCurrentPoints] = useState(0);
     const countdownRef = useRef(null);
     const scannerRef = useRef(null);
     const interactionRef = useRef(false);
@@ -74,6 +76,7 @@ const KioskMode = ({ timeout = 20, onExit }) => {
         setCheckinResult(null);
         setErrorMsg('');
         setCountdown(timeout);
+        setCurrentPoints(0);
         interactionRef.current = false;
     }, [timeout]);
 
@@ -118,18 +121,18 @@ const KioskMode = ({ timeout = 20, onExit }) => {
         setPhase('processing');
 
         try {
-            // 1. Perform check-in automatically
-            const checkinRes = await axios.post(`${API_URL}/checkin`, {
+            // Single request: check-in + get profile in one call
+            const res = await axios.post(`${API_URL}/checkin/kiosk`, {
                 customerId,
                 scannedBy: 'Kiosk',
                 tenant_slug: tenantSlug
             });
 
-            // 2. Get customer details (perks + gifts)
-            const profileRes = await axios.get(`${API_URL}/customers/${customerId}?tenant_slug=${tenantSlug}`);
+            const { checkin, customer, perks, pendingGifts } = res.data;
 
-            setCheckinResult(checkinRes.data);
-            setCustomerData(profileRes.data);
+            setCheckinResult(checkin);
+            setCustomerData({ customer, perks, pendingGifts });
+            setCurrentPoints(checkin.points);
             setPhase('result');
         } catch (error) {
             const msg = error.response?.data?.error || 'Error al registrar visita';
@@ -148,10 +151,12 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 redeemedBy: 'Kiosk',
                 tenant_slug: tenantSlug
             });
-            // Update local state
+            const newPoints = res.data.remainingPoints;
+            // Update all state consistently
+            setCurrentPoints(newPoints);
             setCustomerData(prev => ({
                 ...prev,
-                customer: { ...prev.customer, points_balance: res.data.remainingPoints },
+                customer: { ...prev.customer, points_balance: newPoints },
                 pendingGifts: prev.pendingGifts.filter(g => g.id !== giftId)
             }));
             // Print ticket
@@ -166,7 +171,7 @@ const KioskMode = ({ timeout = 20, onExit }) => {
         }
     };
 
-    const handleRedeem = async (perkId) => {
+    const handleRedeem = async (perkId, perkCost) => {
         pauseCountdown();
         setActionLoading(true);
         try {
@@ -176,10 +181,14 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 redeemedBy: 'Kiosk',
                 tenant_slug: tenantSlug
             });
+            const newPoints = res.data.remainingPoints;
+            // Update points in all relevant state
+            setCurrentPoints(newPoints);
             setCustomerData(prev => ({
                 ...prev,
-                customer: { ...prev.customer, points_balance: res.data.remainingPoints }
+                customer: { ...prev.customer, points_balance: newPoints }
             }));
+            setCheckinResult(prev => prev ? { ...prev, points: newPoints } : prev);
             if (res.data.ticket) {
                 printRedemptionTicket(res.data.ticket);
             }
@@ -236,7 +245,7 @@ const KioskMode = ({ timeout = 20, onExit }) => {
 
     // phase === 'result'
     const { customer, perks, pendingGifts } = customerData || {};
-    const hasBenefits = (pendingGifts && pendingGifts.length > 0) || (perks && perks.some(p => customer?.points_balance >= p.cost_points));
+    const hasBenefits = (pendingGifts && pendingGifts.length > 0) || (perks && perks.some(p => currentPoints >= p.cost_points));
 
     return (
         <div className="kiosk-container" onClick={() => { if (!interactionRef.current) pauseCountdown(); }}>
@@ -258,10 +267,10 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                     Visita registrada exitosamente
                 </p>
 
-                {/* Stats */}
+                {/* Stats — always use currentPoints for accuracy */}
                 <div className="kiosk-stats">
                     <div className="kiosk-stat">
-                        <span className="kiosk-stat-value">{checkinResult?.points || customer?.points_balance || 0}</span>
+                        <span className="kiosk-stat-value">{currentPoints}</span>
                         <span className="kiosk-stat-label">Puntos</span>
                     </div>
                     <div className="kiosk-stat">
@@ -320,10 +329,10 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                     )}
 
                     {/* Redeemable perks */}
-                    {perks && perks.filter(p => customer?.points_balance >= p.cost_points).length > 0 && (
+                    {perks && perks.filter(p => currentPoints >= p.cost_points).length > 0 && (
                         <div className="kiosk-section">
                             <h3><Gift size={20} style={{ verticalAlign: 'middle' }} /> Canjear con Puntos</h3>
-                            {perks.filter(p => customer?.points_balance >= p.cost_points).map(perk => (
+                            {perks.filter(p => currentPoints >= p.cost_points).map(perk => (
                                 <div key={perk.id} className="kiosk-benefit-item">
                                     <div>
                                         <strong>{perk.name}</strong>
@@ -332,7 +341,7 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                                     <button
                                         className="btn-primary"
                                         style={{ width: 'auto', padding: '12px 24px' }}
-                                        onClick={() => handleRedeem(perk.id)}
+                                        onClick={() => handleRedeem(perk.id, perk.cost_points)}
                                         disabled={actionLoading}
                                     >
                                         <Gift size={18} /> Canjear

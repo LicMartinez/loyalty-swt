@@ -23,7 +23,16 @@ app.use(cors({
 
 // Rate limiting
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, message: { error: 'Demasiadas solicitudes' } });
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: { error: 'Demasiados intentos. Espera 15 minutos.' } });
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    // Los logins exitosos no cuentan contra el límite; la cuenta ya tiene su
+    // propio bloqueo (5 intentos fallidos -> 15 min) en auth-routes.js.
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Demasiados intentos. Espera 15 minutos.' },
+});
 app.use('/api/', apiLimiter);
 app.use('/api/auth/login', loginLimiter);
 

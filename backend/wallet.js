@@ -4,6 +4,11 @@ const jwt = require('jsonwebtoken');
 const ISSUER_ID = process.env.GOOGLE_ISSUER_ID;
 const CLASS_ID = process.env.GOOGLE_CLASS_ID;
 
+// Logo por defecto para tenants sin logo propio. Google exige un programLogo
+// válido para crear una LoyaltyClass; esta imagen vive en nuestro bucket público.
+const DEFAULT_LOGO_URL = process.env.DEFAULT_WALLET_LOGO_URL
+    || 'https://angmhxtwcfbcpsozkuka.supabase.co/storage/v1/object/public/tenant-branding/_defaults/logo.png';
+
 // Cargar credenciales JSON de GCP (desde archivo o variable de entorno)
 let credentials;
 if (process.env.GCP_SERVICE_ACCOUNT_JSON) {
@@ -44,22 +49,28 @@ async function ensureLoyaltyClassExists(tenantConfig) {
                 id: classId,
                 issuerName: tenantConfig?.wallet_issuer_name || 'Loyalty',
                 programName: tenantConfig?.wallet_program_name || 'Loyalty Program',
-                programLogo: {
-                    sourceUri: {
-                        uri: tenantConfig?.wallet_logo_url || 'https://storage.googleapis.com/wallet-lab-tools-codelab-artifacts-public/pass_google_logo.jpg'
-                    },
-                    contentDescription: {
-                        defaultValue: {
-                            language: 'es-MX',
-                            value: `${tenantConfig?.wallet_issuer_name || 'Loyalty'} Logo`
-                        }
-                    }
-                },
                 reviewStatus: 'UNDER_REVIEW',
                 countryCode: 'MX',
                 hexBackgroundColor: tenantConfig?.wallet_bg_color || '#1a1a2e',
                 accountNameLabel: 'Nombre',
                 accountIdLabel: 'ID Cliente'
+            };
+
+            // Google EXIGE un programLogo válido para crear la LoyaltyClass.
+            // Usamos el logo del tenant si es válido (http/https); si no,
+            // caemos a un logo por defecto que sí carga (bucket público).
+            const tenantLogo = tenantConfig?.wallet_logo_url;
+            const logoUrl = (tenantLogo && /^https?:\/\//i.test(String(tenantLogo).trim()))
+                ? tenantLogo.trim()
+                : DEFAULT_LOGO_URL;
+            classData.programLogo = {
+                sourceUri: { uri: logoUrl },
+                contentDescription: {
+                    defaultValue: {
+                        language: 'es-MX',
+                        value: `${tenantConfig?.wallet_issuer_name || 'Loyalty'} Logo`
+                    }
+                }
             };
             
             try {

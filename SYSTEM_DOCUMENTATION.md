@@ -11,6 +11,9 @@
 - Panel de **administración** completo
 - **Impresión térmica** de tickets (ESC/POS)
 - Soporte **multi-tenant** (múltiples marcas/negocios)
+- **Modo kiosco** para check-in automático desatendido en pantalla grande
+
+> **Estado**: Documento sincronizado con el código y la base de datos en producción. Cubre: modo kiosco, endpoint optimizado `/api/checkin/kiosk`, rate limiter de login ajustado, logo por defecto para Google Wallet, y el esquema real de la BD verificado en Supabase.
 
 ---
 
@@ -110,11 +113,14 @@ backend/
 | GET | `/api/customers/:id/benefits` | Portal público de beneficios | No |
 | GET | `/api/customers/:id/progress` | Progreso de tarjeta de sellos | No |
 | GET | `/api/customers/:id/apple-pass` | Descargar .pkpass de Apple Wallet | No |
-| POST | `/api/checkin` | Registrar visita (check-in) | No* |
+| POST | `/api/checkin` | Registrar visita (check-in) — flujo staff | No* |
+| POST | `/api/checkin/kiosk` | Check-in + perfil (perks+gifts) en **una sola llamada**, optimizado para modo kiosco | No* |
 | POST | `/api/redemption` | Canjear perk con puntos | No* |
 | POST | `/api/redemption/gift` | Redimir regalo directo (gratis) | No* |
 | GET | `/api/wallet/status` | Diagnóstico Google Wallet config | No |
 | POST | `/api/print` | Puente de impresión TCP | No |
+
+**Sobre `/api/checkin/kiosk`** (agregado para el modo kiosco): combina en una sola petición el check-in y la obtención de perks + regalos pendientes. Internamente ejecuta el insert del check-in y el update del cliente en **paralelo** (`Promise.all`), consulta perks y gifts en paralelo, y hace la actualización de Google Wallet y el auto-regalo como fire-and-forget. Esto reduce la latencia percibida (~300-500ms vs ~1s+ de los 2 requests secuenciales del flujo staff). Devuelve `{ checkin, customer, perks, pendingGifts }`.
 
 *Estos endpoints validan `tenant_slug` para aislamiento entre negocios.
 
@@ -158,8 +164,9 @@ Requiere JWT con rol `super_admin`.
 
 - **Helmet**: Headers HTTP de seguridad
 - **CORS**: Restringido a `ALLOWED_ORIGINS`
-- **Rate Limiting**: 100 req/min global, 5 intentos de login/15 min
-- **Bloqueo de cuenta**: 5 intentos fallidos → bloqueo 15 min
+- **Rate Limiting**: 100 req/min global; login limitado a **10 intentos/15 min por IP** con `skipSuccessfulRequests: true` (los logins exitosos no cuentan contra el límite, para no penalizar a usuarios que aciertan tras un par de errores)
+- **Bloqueo de cuenta**: 5 intentos fallidos → bloqueo 15 min (protección anti-fuerza-bruta a nivel de cuenta, independiente del rate limit por IP)
+- **Nota operativa**: el rate limiter usa almacén en memoria (MemoryStore). En Vercel (serverless) los contadores viven por instancia y se limpian al reciclarse o con un redeploy. Un 429 en login suele ser bloqueo de IP, no de cuenta.
 - **Validación de email**: Bloquea dominios desechables (60+ dominios)
 - **JWT**: Tokens con expiración de 24h, roles embebidos
 - **Contraseñas**: bcrypt con 12 salt rounds
@@ -174,8 +181,11 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
 
 # Google Wallet
 GOOGLE_ISSUER_ID=3388000000023147315
-GOOGLE_CLASS_ID=3388000000023147315.Loyalty_default
+GOOGLE_CLASS_ID=3388000000023147315.Loyalty_PANEM
 GCP_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+# Opcional: logo por defecto para tenants sin logo propio (Google exige programLogo válido).
+# Si no se define, se usa un logo genérico alojado en el bucket público de Supabase.
+DEFAULT_WALLET_LOGO_URL=https://<proyecto>.supabase.co/storage/v1/object/public/tenant-branding/_defaults/logo.png
 
 # Apple Wallet
 APPLE_TEAM_ID=7S87DS9Z82
@@ -214,6 +224,7 @@ frontend/
 │   ├── components/
 │   │   ├── Scanner.jsx            # Escáner QR con html5-qrcode
 │   │   ├── CustomerProfile.jsx    # Perfil post-scan: check-in, canjes, regalos
+│   │   ├── KioskMode.jsx          # Modo kiosco: check-in automático + countdown configurable
 │   │   ├── StaffLogin.jsx         # Login staff (slug + user + pass)
 │   │   └── PrinterConfig.jsx      # Configuración método de impresión
 │   ├── pages/
@@ -245,6 +256,23 @@ frontend/
 #### Cliente - Beneficios (`/benefits/:customerId`)
 1. Vista pública accesible desde el pase digital
 2. Muestra puntos, perks disponibles, regalos pendientes
+
+#### Modo Kiosco (check-in automático, pantalla grande)
+Pensado para montar el sistema en una pantalla grande sin hostess. Se activa desde el header del Staff Portal (icono de monitor → panel de configuración → "Activar Modo Kiosco").
+
+1. Pantalla completa con escáner QR permanente
+2. Al escanear un QR válido, ejecuta el check-in **automáticamente** vía `POST /api/checkin/kiosk` (una sola llamada)
+3. Muestra pantalla de resultado: bienvenida, puntos, visitas, nivel, progreso de ciclo y recompensa de ciclo si aplica
+4. Si el cliente tiene beneficios (cortesías o perks canjeables), los muestra para redimir en el momento
+5. **Countdown configurable** (default 20s, rango 5–120s) que regresa automáticamente al escáner si no hay interacción
+6. La interacción del usuario (tap / redención) **pausa** el countdown y lo reanuda al terminar
+
+Detalles de comportamiento:
+- El timeout se guarda en `localStorage` (`kiosk_timeout`), persiste entre recargas
+- Los puntos mostrados usan un estado `currentPoints` que se actualiza tras cada redención, evitando mostrar saldos desactualizados
+- La lista de perks se re-evalúa contra `currentPoints`: si tras un canje ya no alcanza, el perk desaparece
+- En error (QR inválido, límite diario, etc.) muestra el mensaje 5s y vuelve al escáner
+- Botón "Volver al escáner" para regresar manualmente y botón discreto "Salir del modo kiosco"
 
 ### Métodos de Impresión
 
@@ -330,20 +358,21 @@ Clientes registrados en el programa de lealtad.
 
 | Columna | Tipo | Descripción |
 |---------|------|-------------|
-| id | UUID (PK) | ID del cliente (usado en QR) |
+| id | UUID (PK) | ID del cliente (usado en QR). Default `uuid_generate_v4()` |
 | tenant_id | UUID (FK→tenants) | Negocio al que pertenece |
-| name | VARCHAR | Nombre completo |
-| email | VARCHAR | Email (único por tenant) |
-| phone | VARCHAR | Teléfono (10 dígitos MX) |
+| name | TEXT | Nombre completo |
+| email | TEXT (UNIQUE global) | ⚠️ La restricción UNIQUE es **global**, no por tenant. El backend además valida duplicados por (tenant_id + email) en el registro |
+| phone | TEXT | Teléfono (10 dígitos MX) |
 | birthday | DATE | Fecha de cumpleaños |
-| visits_count | INTEGER | Total de visitas acumuladas |
-| points_balance | INTEGER | Saldo de puntos actual |
-| wallet_pass_id | VARCHAR | ID del objeto en Google Wallet |
+| visits_count | INTEGER | Total de visitas acumuladas (default 0) |
+| points_balance | INTEGER | Saldo de puntos actual (default 0) |
+| wallet_pass_id | TEXT (UNIQUE) | ID del objeto en Google Wallet |
 | tier_id | UUID (FK→loyalty_tiers, NOT NULL) | Nivel actual |
-| cycle_visits_count | INTEGER (>=0) | Visitas del ciclo actual |
-| cycles_completed | INTEGER (>=0) | Ciclos completados total |
-| notes | TEXT | Notas internas del admin |
-| created_at | TIMESTAMPTZ | Fecha de registro |
+| cycle_visits_count | INTEGER (CHECK >=0) | Visitas del ciclo actual (default 0) |
+| cycles_completed | INTEGER (CHECK >=0) | Ciclos completados total (default 0) |
+| is_active | BOOLEAN | Cliente activo (default true) |
+| notes | TEXT | Notas internas del admin (default '') |
+| created_at | TIMESTAMPTZ | Fecha de registro (default now()) |
 
 #### `loyalty_tiers`
 Niveles de lealtad configurables por tenant.
@@ -366,14 +395,14 @@ Configuración del programa por tenant.
 
 | Columna | Tipo | Descripción |
 |---------|------|-------------|
-| id | INTEGER (PK) | Identificador |
-| tenant_id | UUID | Tenant |
-| points_per_visit | INTEGER | Puntos por visita (legacy) |
-| program_name | VARCHAR | Nombre del programa |
-| cycle_visits_required | INTEGER (2-50) | Visitas para completar un ciclo |
-| cycle_reward_perk_id | UUID (FK→perks) | Perk de recompensa al completar ciclo |
-| max_checkins_per_day | INTEGER | Límite de check-ins diarios (0=ilimitado) |
-| updated_at | TIMESTAMPTZ | Última actualización |
+| id | INTEGER (PK) | Identificador (default 1) |
+| tenant_id | UUID (UNIQUE, FK→tenants) | Tenant (una config por tenant) |
+| points_per_visit | INTEGER | Puntos por visita (legacy, default 10; los puntos reales vienen del tier) |
+| program_name | TEXT | Nombre del programa (default 'Loyalty PANEM') |
+| cycle_visits_required | INTEGER (CHECK 2-50) | Visitas para completar un ciclo (default 10) |
+| cycle_reward_perk_id | UUID (FK→perks, nullable) | Perk de recompensa al completar ciclo |
+| max_checkins_per_day | INTEGER | Límite de check-ins diarios (default 1; 0=ilimitado) |
+| updated_at | TIMESTAMPTZ | Última actualización (default now()) |
 
 #### `checkins`
 Registro de visitas.
@@ -391,13 +420,14 @@ Beneficios canjeables con puntos.
 
 | Columna | Tipo | Descripción |
 |---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant |
-| name | VARCHAR | Nombre del beneficio |
+| id | UUID (PK) | Identificador (default `uuid_generate_v4()`) |
+| tenant_id | UUID (FK→tenants) | Tenant |
+| name | TEXT | Nombre del beneficio |
 | description | TEXT | Descripción |
 | cost_points | INTEGER | Costo en puntos |
-| is_active | BOOLEAN | Si está disponible |
-| created_at | TIMESTAMPTZ | Creación |
+| cost_visits | INTEGER | Costo alternativo en visitas (nullable) |
+| is_active | BOOLEAN | Si está disponible (default true) |
+| created_at | TIMESTAMPTZ | Creación (default now()) |
 
 #### `redemptions`
 Registro de canjes de perks.
@@ -419,31 +449,31 @@ Regalos/cortesías directas (no requieren puntos).
 | id | UUID (PK) | Identificador |
 | tenant_id | UUID | Tenant |
 | customer_id | UUID (FK→customers) | Cliente beneficiado |
-| type | VARCHAR | 'perk' o 'points' |
-| points_amount | INTEGER | Si tipo=points, cantidad regalada |
-| perk_id | UUID (FK→perks) | Si tipo=perk, cuál beneficio |
-| reason | VARCHAR | Motivo del regalo |
-| given_by | VARCHAR | Quien lo otorgó |
+| type | TEXT (CHECK 'points'/'perk') | Tipo de regalo |
+| points_amount | INTEGER | Si tipo=points, cantidad regalada (default 0) |
+| perk_id | UUID (FK→perks, nullable) | Si tipo=perk, cuál beneficio |
+| reason | TEXT | Motivo del regalo |
+| given_by | TEXT | Quien lo otorgó ('system' para auto-regalos) |
 | redeemed_at | TIMESTAMPTZ | Null si no se ha redimido |
-| created_at | TIMESTAMPTZ | Creación |
+| created_at | TIMESTAMPTZ | Creación (default now()) |
 
 #### `promotions`
 Promociones temporales configurables.
 
 | Columna | Tipo | Descripción |
 |---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant |
-| name | VARCHAR | Nombre de la promoción |
+| id | UUID (PK) | Identificador (default `gen_random_uuid()`) |
+| tenant_id | UUID (FK→tenants) | Tenant |
+| name | TEXT | Nombre de la promoción |
 | description | TEXT | Descripción |
-| type | VARCHAR | Tipo de promoción |
-| value | NUMERIC | Valor de la promoción |
-| perk_id | UUID (FK→perks) | Perk asociado (opcional) |
-| start_date | DATE | Fecha inicio |
-| end_date | DATE | Fecha fin |
-| is_active | BOOLEAN | Activa/inactiva |
-| days_of_week | JSONB/ARRAY | Días válidos [0-6] |
-| created_at | TIMESTAMPTZ | Creación |
+| type | TEXT (CHECK) | Tipo: `double_points`, `bonus_points` o `free_perk` |
+| value | INTEGER | Valor de la promoción (default 0) |
+| perk_id | UUID (FK→perks, nullable) | Perk asociado (para `free_perk`) |
+| start_date | TIMESTAMPTZ | Fecha/hora inicio |
+| end_date | TIMESTAMPTZ | Fecha/hora fin |
+| is_active | BOOLEAN | Activa/inactiva (default true) |
+| days_of_week | INTEGER[] | Días válidos [0-6] (default `[]`) |
+| created_at | TIMESTAMPTZ | Creación (default now()) |
 
 #### `admin_users`
 Usuarios administrativos del sistema.
@@ -498,15 +528,32 @@ Impresoras térmicas configuradas.
 
 | Columna | Tipo | Descripción |
 |---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant (probable) |
+| id | UUID (PK) | Identificador (default `gen_random_uuid()`) |
+| tenant_id | UUID (FK→tenants) | Tenant |
 | name | VARCHAR | Nombre descriptivo |
 | ip_address | VARCHAR | IP de la impresora |
 | port | INTEGER | Puerto (default 9100) |
-| is_active | BOOLEAN | Activa |
-| print_on_checkin | BOOLEAN | Imprimir en check-in |
-| print_on_redemption | BOOLEAN | Imprimir en canje |
-| print_on_cycle_reward | BOOLEAN | Imprimir en recompensa de ciclo |
+| is_active | BOOLEAN | Activa (default true) |
+| print_on_checkin | BOOLEAN | Imprimir en check-in (default **false**) |
+| print_on_redemption | BOOLEAN | Imprimir en canje (default **true**) |
+| print_on_cycle_reward | BOOLEAN | Imprimir en recompensa de ciclo (default **true**) |
+| created_at | TIMESTAMPTZ | Creación (default now()) |
+
+#### `admin_sessions`
+Tabla de sesiones (presente en la BD; el flujo actual de auth es stateless con JWT, por lo que normalmente no se usa. Se conserva para compatibilidad / posible invalidación de tokens).
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| id | UUID (PK) | Identificador (default `gen_random_uuid()`) |
+| token | TEXT (UNIQUE) | Token de sesión |
+| created_at | TIMESTAMPTZ | Creación (default now()) |
+| expires_at | TIMESTAMPTZ | Expiración |
+
+### Row Level Security (RLS)
+
+**Todas las tablas del esquema `public` tienen RLS habilitado.** El backend opera con la **service role key** de Supabase, que **bypassa RLS**, por lo que toda la autorización real (aislamiento por tenant, roles) se hace en la capa de aplicación (middleware + filtros `.eq('tenant_id', ...)`). Las tablas `tier_change_history` y `cycle_rewards` tienen además políticas explícitas para `service_role`.
+
+> ⚠️ Importante: como la seguridad depende de la capa de aplicación y de la service role key, **nunca** se debe exponer esa key al frontend ni permitir acceso directo del cliente a la BD.
 
 ---
 
@@ -524,7 +571,8 @@ Impresoras térmicas configuradas.
   - Módulos de texto: Nivel, Progreso de ciclo
   - Link: Portal de beneficios del cliente
 - **Actualizaciones**: Fire-and-forget con retry (0s, 5s, 30s) — no bloquea flujo principal
-- **Multi-tenant**: Cada tenant tiene su propia Loyalty Class (`Loyalty_{slug}`)
+- **Multi-tenant**: Cada tenant tiene su propia Loyalty Class (`Loyalty_{slug}`), creada automáticamente al registrar el primer cliente del tenant
+- **⚠️ `programLogo` obligatorio**: Google **rechaza** la creación de una LoyaltyClass sin un logo válido (URL que cargue). Si el tenant no tiene `wallet_logo_url`, se usa un **logo por defecto** alojado en el bucket público de Supabase (`tenant-branding/_defaults/logo.png`), configurable con `DEFAULT_WALLET_LOGO_URL`. Anteriormente se usaba una URL de ejemplo de Google que dejó de cargar y provocaba fallos de registro en tenants sin logo.
 
 ### Apple Wallet
 
@@ -594,6 +642,27 @@ Impresoras térmicas configuradas.
     8. Auto-regalo si es Platino
     9. Actualizar Google Wallet (async, fire-and-forget)
     10. Retornar: puntos, visitas, nivel, progreso ciclo, auto-gifts
+```
+
+### Check-in Kiosco (automático, optimizado)
+
+```
+[KioskMode.jsx] → escáner QR permanente
+    ↓ QR válido detectado (valida formato UUID en cliente)
+    ↓ POST /api/checkin/kiosk {customerId, scannedBy:'Kiosk', tenant_slug}
+[Proceso en backend — una sola llamada]
+    1. Obtener cliente + validar tenant isolation
+    2. Config + límite diario (una query)
+    3. Resolver tier y calcular puntos
+    4. PARALELO: insert checkin  +  update customer (visits/points)
+    5. Procesar ciclo (cycle-engine)
+    6. PARALELO: obtener perks activos  +  regalos pendientes
+    7. Fire-and-forget: update Google Wallet + auto-regalo Platino
+    8. Retornar { checkin, customer, perks, pendingGifts }
+[KioskMode.jsx]
+    → Muestra resultado + beneficios
+    → Countdown configurable (localStorage kiosk_timeout, default 20s)
+    → Interacción pausa countdown; al expirar vuelve al escáner
 ```
 
 ### Canje de Beneficio (Redemption)
@@ -707,6 +776,7 @@ SPA con client-side routing.
 | Imágenes de Wallet | Branding | Logo, Strip, Icon — para Google y Apple |
 | Impresoras | Printers | IP/puerto + qué eventos imprimir |
 | Niveles | Tiers | 1-10 niveles con puntos customizables |
+| Modo Kiosco | Staff Portal (frontend) | Activación + timeout configurable (5–120s), guardado en localStorage del dispositivo |
 
 ---
 
@@ -751,7 +821,7 @@ npm test             # Vitest single run
 ## Notas Importantes para Implementadores
 
 1. **Supabase Service Role**: El backend usa el service role key (bypassa RLS). Nunca exponerla al frontend.
-2. **Google Wallet Class**: Se crea automáticamente si no existe al registrar el primer cliente de un tenant.
+2. **Google Wallet Class**: Se crea automáticamente si no existe al registrar el primer cliente de un tenant. Requiere un `programLogo` válido: si el tenant no tiene logo, se usa el logo default del bucket (`DEFAULT_WALLET_LOGO_URL`). Un tenant sin logo y sin default válido fallará al registrar clientes.
 3. **Apple Wallet Certs**: Deben estar en `backend/certs/` (signerCert.pem, signerKey.pem, wwdr.pem). Passphrase: `loyalty2024`.
 4. **UUID como QR**: El contenido del código QR en los pases es simplemente el UUID del cliente. El scanner extrae el último segmento si contiene puntos (formato Google: `issuerId.customerId`).
 5. **Fire-and-forget**: Las actualizaciones de Wallet no bloquean el flujo. Si fallan, se reintentan silenciosamente.

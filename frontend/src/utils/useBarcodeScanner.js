@@ -69,17 +69,46 @@ export function useBarcodeScanner(onScan, options = {}) {
 }
 
 /**
+ * Normaliza un UUID que pudo llegar con separadores incorrectos.
+ *
+ * Los lectores USB (HID) "teclean" códigos de tecla físicos que el SO traduce
+ * según el layout de teclado activo. En teclados es-MX/Latam, la tecla que en
+ * layout US produce "-" puede salir como "'", "/", etc. Por eso el guión del
+ * UUID puede llegar convertido en otro carácter (ej. 526f145c'0e02'4065...).
+ *
+ * Estrategia robusta: extraer TODOS los caracteres hexadecimales; si hay
+ * exactamente 32, reconstruir el UUID canónico con guiones en las posiciones
+ * 8-4-4-4-12. Así funciona sin importar qué separador haya enviado el lector.
+ *
+ * @param {string} text
+ * @returns {string} UUID normalizado (o el texto original si no aplica)
+ */
+export function normalizeUuid(text) {
+    const raw = String(text || '').trim();
+    // Tomar solo dígitos hexadecimales (descarta cualquier separador: - ' / _ etc.)
+    const hex = raw.replace(/[^0-9a-fA-F]/g, '');
+    if (hex.length === 32) {
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`.toLowerCase();
+    }
+    return raw;
+}
+
+/**
  * Extrae el UUID del cliente de un texto escaneado.
  * Los pases usan el UUID directo, o el formato Google `issuerId.customerId`.
+ * Tolera separadores incorrectos del lector (normaliza a UUID canónico).
  * @param {string} decodedText
  * @returns {string} customerId
  */
 export function extractCustomerId(decodedText) {
     let customerId = String(decodedText || '').trim();
+    // Formato Google Wallet: issuerId.customerId → tomar el último segmento.
+    // Se separa por punto ANTES de normalizar para no perder ese split.
     if (customerId.includes('.')) {
         customerId = customerId.split('.').pop();
     }
-    return customerId;
+    // Normalizar posibles separadores erróneos (', /, _, etc.) a UUID canónico
+    return normalizeUuid(customerId);
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

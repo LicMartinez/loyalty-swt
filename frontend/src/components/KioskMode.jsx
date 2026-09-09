@@ -1,20 +1,25 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { CheckCircle, Gift, Star, Loader2, AlertTriangle, Clock, QrCode } from 'lucide-react';
+import { CheckCircle, Gift, Star, Loader2, AlertTriangle, Clock, QrCode, ScanLine } from 'lucide-react';
 import { printRedemptionTicket } from '../utils/printer';
+import { useBarcodeScanner, extractCustomerId, isValidCustomerId } from '../utils/useBarcodeScanner';
 
 const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') + '/api';
 
 /**
  * KioskMode — Modo automático de check-in para pantalla grande.
- * 
+ *
+ * Métodos de escaneo (coexisten):
+ *  - Lector USB de código de barras/QR (HID keyboard-wedge) — método principal
+ *  - Cámara del dispositivo (html5-qrcode) — método secundario
+ *
  * Flujo:
- * 1. Muestra escáner QR en pantalla completa
+ * 1. Muestra escáner (cámara) + escucha lector USB en pantalla completa
  * 2. Al escanear, ejecuta check-in automáticamente (single request)
  * 3. Muestra resultado (éxito + beneficios si hay)
- * 4. Si hay beneficios, muestra countdown configurable
- * 5. Regresa automáticamente al escáner al terminar el countdown
+ * 4. Countdown de INACTIVIDAD configurable: cada interacción del usuario lo
+ *    reinicia desde cero; si no hay interacción, vuelve al escáner al llegar a 0
  */
 const KioskMode = ({ timeout = 20, onExit }) => {
     const [phase, setPhase] = useState('scanning'); // scanning | processing | result | error
@@ -23,105 +28,90 @@ const KioskMode = ({ timeout = 20, onExit }) => {
     const [countdown, setCountdown] = useState(timeout);
     const [errorMsg, setErrorMsg] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
-    // Track current points in local state for accurate display after redemptions
     const [currentPoints, setCurrentPoints] = useState(0);
+
     const countdownRef = useRef(null);
-    const scannerRef = useRef(null);
-    const interactionRef = useRef(false);
+    const phaseRef = useRef(phase);
+    const processingRef = useRef(false); // evita escaneos concurrentes
 
     const tenantSlug = localStorage.getItem('staff_slug') || '';
 
-    // Cleanup countdown on unmount
-    useEffect(() => {
-        return () => {
-            if (countdownRef.current) clearInterval(countdownRef.current);
-        };
+    // Mantener phaseRef sincronizado para usarlo dentro de callbacks estables
+    useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+    // ---------- Countdown de inactividad ----------
+    const stopCountdown = useCallback(() => {
+        if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+        }
     }, []);
 
-    // Start countdown when entering result phase
-    useEffect(() => {
-        if (phase === 'result') {
-            interactionRef.current = false;
-            setCountdown(timeout);
-            countdownRef.current = setInterval(() => {
-                setCountdown(prev => {
-                    if (prev <= 1) {
-                        clearInterval(countdownRef.current);
-                        resetToScanner();
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-            }, 1000);
-        }
-
-        return () => {
-            if (countdownRef.current) clearInterval(countdownRef.current);
-        };
-    }, [phase, timeout]);
-
-    // Start countdown for error phase (5 seconds)
-    useEffect(() => {
-        if (phase === 'error') {
-            const timer = setTimeout(() => {
-                resetToScanner();
-            }, 5000);
-            return () => clearTimeout(timer);
-        }
-    }, [phase]);
-
     const resetToScanner = useCallback(() => {
+        stopCountdown();
         setPhase('scanning');
         setCustomerData(null);
         setCheckinResult(null);
         setErrorMsg('');
         setCountdown(timeout);
         setCurrentPoints(0);
-        interactionRef.current = false;
-    }, [timeout]);
+        processingRef.current = false;
+    }, [timeout, stopCountdown]);
 
-    const pauseCountdown = () => {
-        if (countdownRef.current) {
-            clearInterval(countdownRef.current);
-            countdownRef.current = null;
+    // Inicia (o reinicia) el countdown desde el timeout completo.
+    // Llamado al entrar a 'result' y en CADA interacción del usuario.
+    const restartCountdown = useCallback(() => {
+        if (phaseRef.current !== 'result') return;
+        stopCountdown();
+        setCountdown(timeout);
+        countdownRef.current = setInterval(() => {
+            setCountdown(prev => {
+                if (prev <= 1) {
+                    stopCountdown();
+                    resetToScanner();
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    }, [timeout, stopCountdown, resetToScanner]);
+
+    // Arranca el countdown al entrar a la fase de resultado
+    useEffect(() => {
+        if (phase === 'result') {
+            restartCountdown();
         }
-        interactionRef.current = true;
-    };
+        return () => stopCountdown();
+    }, [phase, restartCountdown, stopCountdown]);
 
-    const resumeCountdown = () => {
-        if (!countdownRef.current && phase === 'result') {
-            countdownRef.current = setInterval(() => {
-                setCountdown(prev => {
-                    if (prev <= 1) {
-                        clearInterval(countdownRef.current);
-                        resetToScanner();
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-            }, 1000);
+    // Fase de error: vuelve al escáner tras 5s
+    useEffect(() => {
+        if (phase === 'error') {
+            const timer = setTimeout(() => resetToScanner(), 5000);
+            return () => clearTimeout(timer);
         }
-    };
+    }, [phase, resetToScanner]);
 
+    // Limpieza global al desmontar
+    useEffect(() => () => stopCountdown(), [stopCountdown]);
+
+    // ---------- Escaneo (cámara + lector USB) ----------
     const handleScan = useCallback(async (decodedText) => {
-        // Extract customer ID from scanned QR
-        let customerId = decodedText.trim();
-        if (customerId.includes('.')) {
-            customerId = customerId.split('.').pop();
-        }
+        // Evitar procesamiento concurrente o fuera de la fase de escaneo
+        if (processingRef.current) return;
+        if (phaseRef.current !== 'scanning') return;
 
-        // Validate UUID format
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(customerId)) {
-            setErrorMsg('Código QR no válido');
+        const customerId = extractCustomerId(decodedText);
+        if (!isValidCustomerId(customerId)) {
+            setErrorMsg('Código no válido');
             setPhase('error');
             return;
         }
 
+        processingRef.current = true;
         setPhase('processing');
 
         try {
-            // Single request: check-in + get profile in one call
             const res = await axios.post(`${API_URL}/checkin/kiosk`, {
                 customerId,
                 scannedBy: 'Kiosk',
@@ -129,7 +119,6 @@ const KioskMode = ({ timeout = 20, onExit }) => {
             });
 
             const { checkin, customer, perks, pendingGifts } = res.data;
-
             setCheckinResult(checkin);
             setCustomerData({ customer, perks, pendingGifts });
             setCurrentPoints(checkin.points);
@@ -138,11 +127,17 @@ const KioskMode = ({ timeout = 20, onExit }) => {
             const msg = error.response?.data?.error || 'Error al registrar visita';
             setErrorMsg(msg);
             setPhase('error');
+        } finally {
+            processingRef.current = false;
         }
     }, [tenantSlug]);
 
+    // Lector USB (HID): activo solo durante la fase de escaneo
+    useBarcodeScanner(handleScan, { enabled: phase === 'scanning' });
+
+    // ---------- Redenciones ----------
     const handleRedeemGift = async (giftId) => {
-        pauseCountdown();
+        restartCountdown(); // la interacción reinicia el contador
         setActionLoading(true);
         try {
             const res = await axios.post(`${API_URL}/redemption/gift`, {
@@ -152,27 +147,23 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 tenant_slug: tenantSlug
             });
             const newPoints = res.data.remainingPoints;
-            // Update all state consistently
             setCurrentPoints(newPoints);
             setCustomerData(prev => ({
                 ...prev,
                 customer: { ...prev.customer, points_balance: newPoints },
                 pendingGifts: prev.pendingGifts.filter(g => g.id !== giftId)
             }));
-            // Print ticket
-            if (res.data.ticket) {
-                printRedemptionTicket(res.data.ticket);
-            }
+            if (res.data.ticket) printRedemptionTicket(res.data.ticket);
         } catch (error) {
             console.error('Error redeeming gift:', error);
         } finally {
             setActionLoading(false);
-            resumeCountdown();
+            restartCountdown();
         }
     };
 
-    const handleRedeem = async (perkId, perkCost) => {
-        pauseCountdown();
+    const handleRedeem = async (perkId) => {
+        restartCountdown();
         setActionLoading(true);
         try {
             const res = await axios.post(`${API_URL}/redemption`, {
@@ -182,23 +173,25 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 tenant_slug: tenantSlug
             });
             const newPoints = res.data.remainingPoints;
-            // Update points in all relevant state
             setCurrentPoints(newPoints);
             setCustomerData(prev => ({
                 ...prev,
                 customer: { ...prev.customer, points_balance: newPoints }
             }));
             setCheckinResult(prev => prev ? { ...prev, points: newPoints } : prev);
-            if (res.data.ticket) {
-                printRedemptionTicket(res.data.ticket);
-            }
+            if (res.data.ticket) printRedemptionTicket(res.data.ticket);
         } catch (error) {
             console.error('Error redeeming perk:', error);
         } finally {
             setActionLoading(false);
-            resumeCountdown();
+            restartCountdown();
         }
     };
+
+    // Cualquier interacción del usuario en la vista de resultado reinicia el contador
+    const handleUserActivity = useCallback(() => {
+        if (phaseRef.current === 'result') restartCountdown();
+    }, [restartCountdown]);
 
     // ============ RENDER ============
 
@@ -208,7 +201,10 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 <div className="kiosk-header">
                     <QrCode size={64} color="var(--primary)" />
                     <h1 className="kiosk-title">Escanea tu pase</h1>
-                    <p className="kiosk-subtitle">Presenta el código QR de tu Google Wallet o Apple Wallet</p>
+                    <p className="kiosk-subtitle">Acerca tu código al lector o usa la cámara</p>
+                    <div className="kiosk-reader-hint">
+                        <ScanLine size={18} /> Lector activo — presenta tu QR
+                    </div>
                 </div>
                 <div className="kiosk-scanner">
                     <KioskScanner onScan={handleScan} />
@@ -248,7 +244,13 @@ const KioskMode = ({ timeout = 20, onExit }) => {
     const hasBenefits = (pendingGifts && pendingGifts.length > 0) || (perks && perks.some(p => currentPoints >= p.cost_points));
 
     return (
-        <div className="kiosk-container" onClick={() => { if (!interactionRef.current) pauseCountdown(); }}>
+        <div
+            className="kiosk-container"
+            onClick={handleUserActivity}
+            onTouchStart={handleUserActivity}
+            onScroll={handleUserActivity}
+            onMouseMove={handleUserActivity}
+        >
             {/* Countdown bar */}
             <div className="kiosk-countdown-bar">
                 <div
@@ -341,7 +343,7 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                                     <button
                                         className="btn-primary"
                                         style={{ width: 'auto', padding: '12px 24px' }}
-                                        onClick={() => handleRedeem(perk.id, perk.cost_points)}
+                                        onClick={() => handleRedeem(perk.id)}
                                         disabled={actionLoading}
                                     >
                                         <Gift size={18} /> Canjear
@@ -371,7 +373,7 @@ const KioskMode = ({ timeout = 20, onExit }) => {
 };
 
 /**
- * Inner scanner component for kiosk mode.
+ * Inner scanner component for kiosk mode (cámara).
  * Re-initializes cleanly on each mount.
  */
 const KioskScanner = ({ onScan }) => {

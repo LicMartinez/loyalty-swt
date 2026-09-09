@@ -4,7 +4,8 @@ import CustomerProfile from './components/CustomerProfile';
 import PrinterConfig from './components/PrinterConfig';
 import KioskMode from './components/KioskMode';
 import StaffLogin from './components/StaffLogin';
-import { QrCode, Settings, LogOut, Monitor } from 'lucide-react';
+import { QrCode, Settings, LogOut, Monitor, ScanLine } from 'lucide-react';
+import { useBarcodeScanner, extractCustomerId, isValidCustomerId } from './utils/useBarcodeScanner';
 
 function App() {
   const [scannedId, setScannedId] = useState(null);
@@ -32,16 +33,23 @@ function App() {
   };
 
   const handleScanSuccess = (decodedText) => {
-    let customerId = decodedText.trim();
-    if (customerId.includes('.')) {
-      customerId = customerId.split('.').pop();
-    }
+    const customerId = extractCustomerId(decodedText);
     setScannedId(customerId);
   };
 
   const handleReset = () => {
     setScannedId(null);
   };
+
+  // Lector USB (HID) como método secundario en el flujo normal de staff.
+  // Activo solo en la vista de escaneo (sin cliente seleccionado ni paneles abiertos).
+  const usbScanEnabled = !!token && !kioskActive && !scannedId && !showPrinterConfig && !showKioskSettings;
+  useBarcodeScanner((code) => {
+    const customerId = extractCustomerId(code);
+    if (isValidCustomerId(customerId)) {
+      setScannedId(customerId);
+    }
+  }, { enabled: usbScanEnabled });
 
   const handleKioskTimeoutChange = (value) => {
     const val = Math.max(5, Math.min(120, parseInt(value, 10) || 20));
@@ -152,7 +160,10 @@ function App() {
           <div className="card text-center">
             <QrCode size={48} color="var(--primary)" className="mb-4" style={{ margin: '0 auto' }} />
             <h2 className="mb-2">Escanear Pase</h2>
-            <p className="text-muted mb-4">Apunta la cámara al código QR de Google Wallet del cliente.</p>
+            <p className="text-muted mb-4">Usa el lector USB o apunta la cámara al código QR del cliente.</p>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: 'var(--success)', marginBottom: 12 }}>
+              <ScanLine size={16} /> Lector USB activo
+            </div>
             <Scanner onScanSuccess={handleScanSuccess} />
           </div>
         ) : (

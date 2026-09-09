@@ -231,7 +231,8 @@ frontend/
 │   │   ├── Register.jsx           # Registro público de clientes (?tenant=slug)
 │   │   └── Benefits.jsx           # Portal público de beneficios (/benefits/:id)
 │   └── utils/
-│       └── printer.js             # 3 métodos de impresión: browser/serial/network
+│       ├── printer.js             # 3 métodos de impresión: browser/serial/network
+│       └── useBarcodeScanner.js   # Hook lector USB HID + helpers extractCustomerId/isValidCustomerId
 ├── vercel.json
 └── package.json
 ```
@@ -264,13 +265,15 @@ Pensado para montar el sistema en una pantalla grande sin hostess. Se activa des
 2. Al escanear un QR válido, ejecuta el check-in **automáticamente** vía `POST /api/checkin/kiosk` (una sola llamada)
 3. Muestra pantalla de resultado: bienvenida, puntos, visitas, nivel, progreso de ciclo y recompensa de ciclo si aplica
 4. Si el cliente tiene beneficios (cortesías o perks canjeables), los muestra para redimir en el momento
-5. **Countdown configurable** (default 20s, rango 5–120s) que regresa automáticamente al escáner si no hay interacción
-6. La interacción del usuario (tap / redención) **pausa** el countdown y lo reanuda al terminar
+5. **Countdown de inactividad configurable** (default 20s, rango 5–120s): cada interacción del usuario lo **reinicia desde cero**; si no hay interacción, regresa automáticamente al escáner al llegar a 0
+6. Soporta escaneo por **lector USB** (principal) y **cámara** (secundario) simultáneamente
 
 Detalles de comportamiento:
+- **Countdown = temporizador de inactividad**: cualquier interacción (tap, scroll, movimiento, redención) reinicia el contador al timeout completo. Esto garantiza flujo continuo sin que el contador se quede estático mientras el cliente navega sus beneficios.
 - El timeout se guarda en `localStorage` (`kiosk_timeout`), persiste entre recargas
 - Los puntos mostrados usan un estado `currentPoints` que se actualiza tras cada redención, evitando mostrar saldos desactualizados
 - La lista de perks se re-evalúa contra `currentPoints`: si tras un canje ya no alcanza, el perk desaparece
+- Un flag `processingRef` evita check-ins concurrentes (doble escaneo del lector/cámara)
 - En error (QR inválido, límite diario, etc.) muestra el mensaje 5s y vuelve al escáner
 - Botón "Volver al escáner" para regresar manualmente y botón discreto "Salir del modo kiosco"
 
@@ -281,6 +284,25 @@ Detalles de comportamiento:
 | Browser | Genera HTML en iframe oculto, usa `window.print()` | iOS/iPad/Desktop |
 | Serial | Web Serial API directo a impresora USB ESC/POS | Chrome Desktop |
 | Network | HTTP a un Print Bridge (relay HTTP→TCP) | Cualquier dispositivo |
+
+### Métodos de Escaneo de QR
+
+El sistema soporta **dos métodos de escaneo que coexisten** (no se reemplazan):
+
+| Método | Cómo funciona | Uso principal |
+|--------|---------------|---------------|
+| **Lector USB** (HID) | Lector omnidireccional USB (keyboard-wedge): el SO lo ve como teclado, "teclea" el contenido del código + Enter. Capturado por el hook `useBarcodeScanner` que detecta ráfagas rápidas terminadas en Enter | Kiosco desatendido (All-in-One con lector fijo) — **método principal** |
+| **Cámara** (`html5-qrcode`) | Acceso a la cámara del dispositivo, decodifica el QR por video | Respaldo / dispositivos móviles — **método secundario** |
+
+**Hook `useBarcodeScanner`** (`frontend/src/utils/useBarcodeScanner.js`):
+- Escucha `keydown` globalmente; acumula caracteres que llegan en < 50ms entre sí
+- Al recibir Enter, si el buffer tiene longitud suficiente, dispara `onScan(code)`
+- Ignora la escritura en inputs/textarea (evita falsos positivos)
+- Se activa/desactiva con `{ enabled }` según la vista (solo escucha en la fase de escaneo)
+- No requiere drivers ni permisos: el lector se comporta como teclado
+- Recomendación de hardware: el lector debe enviar **Enter** como sufijo (configuración estándar)
+
+Ambos métodos están activos tanto en el **Modo Kiosco** como en el **flujo normal de staff**.
 
 ---
 

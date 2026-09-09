@@ -152,6 +152,20 @@ button {
   margin-top: 12px;
 }
 
+.kiosk-reader-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: var(--success);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 .kiosk-scanner {
   width: 100%;
   max-width: 500px;

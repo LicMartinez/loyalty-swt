@@ -36,7 +36,7 @@ const loginLimiter = rateLimit({
 app.use('/api/', apiLimiter);
 app.use('/api/auth/login', loginLimiter);
 
-app.use(express.json({ limit: '3mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 // Supabase Client Initialization
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -79,7 +79,85 @@ async function getClientBenefits(customerId) {
     return (gifts || []).map(g => g.perks?.name).filter(Boolean);
 }
 
-// Endpoint de diagnóstico para verificar configuración de Google Wallet
+async function resolveActiveTenantBySlug(slug) {
+    const normalized = typeof slug === 'string' ? slug.trim().toLowerCase() : '';
+    if (!normalized) return { error: 'Falta tenant_slug', status: 400 };
+    const { data: tenant, error } = await supabase
+        .from('tenants')
+        .select('id, slug, name, is_active, kiosk_media, wallet_logo_url, wallet_bg_color')
+        .eq('slug', normalized)
+        .single();
+    if (error || !tenant) return { error: 'Negocio no encontrado', status: 400 };
+    if (tenant.is_active === false) return { error: 'Este programa no está activo', status: 403 };
+    return { tenant };
+}
+
+app.get('/api/cover-products', async (req, res) => {
+    const resolved = await resolveActiveTenantBySlug(req.query.tenant_slug);
+    if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+    try {
+        const { data, error } = await supabase
+            .from('cover_products')
+            .select('id, name, description, sort_order')
+            .eq('tenant_id', resolved.tenant.id)
+            .eq('is_active', true)
+            .order('sort_order')
+            .order('name');
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/cover-products/:id/dispatch', async (req, res) => {
+    const resolved = await resolveActiveTenantBySlug(req.body?.tenant_slug);
+    if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+    try {
+        const { data: product, error } = await supabase
+            .from('cover_products')
+            .select('id, name, description, is_active, tenant_id')
+            .eq('id', req.params.id)
+            .eq('tenant_id', resolved.tenant.id)
+            .single();
+        if (error || !product || product.is_active === false) {
+            return res.status(404).json({ error: 'Producto de cover no encontrado' });
+        }
+        await supabase.from('cover_tickets').insert({
+            tenant_id: resolved.tenant.id,
+            product_id: product.id,
+            product_name: product.name,
+            printed_by: req.body?.printed_by || 'Staff',
+        });
+        res.json({
+            success: true,
+            ticket: {
+                ticketKind: 'cover',
+                brandName: resolved.tenant.name,
+                perkName: product.name,
+                perkDescription: product.description,
+                customerName: '1 ACCESO',
+                redeemedAt: new Date().toISOString(),
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/kiosk/display', async (req, res) => {
+    const resolved = await resolveActiveTenantBySlug(req.query.tenant_slug);
+    if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+    const media = Array.isArray(resolved.tenant.kiosk_media) ? resolved.tenant.kiosk_media : [];
+    res.json({
+        name: resolved.tenant.name,
+        slug: resolved.tenant.slug,
+        wallet_logo_url: resolved.tenant.wallet_logo_url,
+        wallet_bg_color: resolved.tenant.wallet_bg_color,
+        kiosk_media: media,
+    });
+});
+
 app.get('/api/wallet/status', async (req, res) => {
     try {
         const status = await wallet.checkStatus();

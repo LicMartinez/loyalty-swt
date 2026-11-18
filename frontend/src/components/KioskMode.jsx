@@ -4,6 +4,20 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 import { CheckCircle, Gift, Star, Loader2, AlertTriangle, Clock, QrCode, ScanLine } from 'lucide-react';
 import { printRedemptionTicket } from '../utils/printer';
 import { useBarcodeScanner, extractCustomerId, isValidCustomerId } from '../utils/useBarcodeScanner';
+import KioskBranding from './KioskBranding';
+
+async function shouldUseCamera() {
+    const pref = localStorage.getItem('kiosk_camera') || 'auto';
+    if (pref === 'off') return false;
+    if (pref === 'on') return true;
+    try {
+        if (!navigator.mediaDevices?.enumerateDevices) return false;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        return devices.some((d) => d.kind === 'videoinput');
+    } catch {
+        return false;
+    }
+}
 
 const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') + '/api';
 
@@ -29,12 +43,22 @@ const KioskMode = ({ timeout = 20, onExit }) => {
     const [errorMsg, setErrorMsg] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
     const [currentPoints, setCurrentPoints] = useState(0);
+    const [useCamera, setUseCamera] = useState(false);
+    const [branding, setBranding] = useState({ name: '', kiosk_media: [] });
 
     const countdownRef = useRef(null);
     const phaseRef = useRef(phase);
     const processingRef = useRef(false); // evita escaneos concurrentes
 
     const tenantSlug = localStorage.getItem('staff_slug') || '';
+
+    useEffect(() => {
+        shouldUseCamera().then(setUseCamera);
+        if (!tenantSlug) return;
+        axios.get(`${API_URL}/kiosk/display`, { params: { tenant_slug: tenantSlug } })
+            .then((res) => setBranding(res.data || { kiosk_media: [] }))
+            .catch(() => {});
+    }, [tenantSlug]);
 
     // Mantener phaseRef sincronizado para usarlo dentro de callbacks estables
     useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -153,7 +177,7 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 customer: { ...prev.customer, points_balance: newPoints },
                 pendingGifts: prev.pendingGifts.filter(g => g.id !== giftId)
             }));
-            if (res.data.ticket) printRedemptionTicket(res.data.ticket);
+            if (res.data.ticket) printRedemptionTicket(res.data.ticket, { target: 'bar' });
         } catch (error) {
             console.error('Error redeeming gift:', error);
         } finally {
@@ -179,7 +203,7 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 customer: { ...prev.customer, points_balance: newPoints }
             }));
             setCheckinResult(prev => prev ? { ...prev, points: newPoints } : prev);
-            if (res.data.ticket) printRedemptionTicket(res.data.ticket);
+            if (res.data.ticket) printRedemptionTicket(res.data.ticket, { target: 'bar' });
         } catch (error) {
             console.error('Error redeeming perk:', error);
         } finally {
@@ -197,17 +221,29 @@ const KioskMode = ({ timeout = 20, onExit }) => {
 
     if (phase === 'scanning') {
         return (
-            <div className="kiosk-container">
-                <div className="kiosk-header">
-                    <QrCode size={64} color="var(--primary)" />
-                    <h1 className="kiosk-title">Escanea tu pase</h1>
-                    <p className="kiosk-subtitle">Acerca tu código al lector o usa la cámara</p>
-                    <div className="kiosk-reader-hint">
-                        <ScanLine size={18} /> Lector activo — presenta tu QR
+            <div className="kiosk-container kiosk-idle">
+                <KioskBranding media={branding.kiosk_media} />
+                <div className="kiosk-idle-overlay">
+                    <div className="kiosk-header">
+                        {branding.wallet_logo_url && (
+                            <img src={branding.wallet_logo_url} alt="" className="kiosk-brand-logo" />
+                        )}
+                        <QrCode size={56} color="var(--primary)" />
+                        <h1 className="kiosk-title">Escanea tu pase</h1>
+                        <p className="kiosk-subtitle">
+                            {useCamera
+                                ? 'Acerca tu código al lector o usa la cámara'
+                                : 'Acerca tu código al lector'}
+                        </p>
+                        <div className="kiosk-reader-hint">
+                            <ScanLine size={18} /> Lector activo — presenta tu QR
+                        </div>
                     </div>
-                </div>
-                <div className="kiosk-scanner">
-                    <KioskScanner onScan={handleScan} />
+                    {useCamera && (
+                        <div className="kiosk-scanner">
+                            <KioskScanner onScan={handleScan} />
+                        </div>
+                    )}
                 </div>
                 <button
                     className="kiosk-exit-btn"

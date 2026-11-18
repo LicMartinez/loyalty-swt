@@ -5,7 +5,7 @@ alwaysApply: true
 
 # SW Loyalty — contexto del proyecto
 
-Antes de explorar el monorepo completo, lee **`docs/00-ESTADO-ACTUAL.md`**. Es la fuente de verdad as-built.
+Antes de explorar el monorepo completo, lee **`SYSTEM_DOCUMENTATION.md`** (documento final: funcionamiento y dónde cambiar código). Mapa corto: **`docs/00-ESTADO-ACTUAL.md`**.
 
 ## Hechos que no debes asumir del README antiguo
 
@@ -27,4 +27,4 @@ Antes de explorar el monorepo completo, lee **`docs/00-ESTADO-ACTUAL.md`**. Es l
 - Filtrar siempre por `tenant_id` (service role bypassa RLS).
 - Endpoints admin → `admin-routes.js`; plataforma → `super-admin-routes.js`; público/staff → `index.js`.
 - Impresión en local → Print Bridge `:4001`, no TCP desde Vercel a LAN.
-- Tras cambios estructurales (API, BD, apps), **actualizar** `docs/00-ESTADO-ACTUAL.md`.
+- Tras cambios estructurales (API, BD, apps), **actualizar** `SYSTEM_DOCUMENTATION.md` y el mapa `docs/00-ESTADO-ACTUAL.md`.

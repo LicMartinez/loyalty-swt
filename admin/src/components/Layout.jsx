@@ -1,6 +1,6 @@
 import React from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Users, Gift, Megaphone, Settings, BarChart3, LogOut, Layers, Printer } from 'lucide-react'
+import { LayoutDashboard, Users, Gift, Megaphone, Settings, BarChart3, LogOut, Layers, Printer, Monitor } from 'lucide-react'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -10,6 +10,7 @@ const navItems = [
   { to: '/reports', icon: BarChart3, label: 'Reportes' },
   { to: '/tiers', icon: Layers, label: 'Niveles' },
   { to: '/printers', icon: Printer, label: 'Impresoras' },
+  { to: '/kiosk', icon: Monitor, label: 'Kiosco / Cover' },
   { to: '/config', icon: Settings, label: 'Configuración' },
 ]
 

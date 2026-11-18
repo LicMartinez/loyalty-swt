@@ -1,19 +1,27 @@
 # SW Loyalty — Documentación Completa del Sistema
 
+> **Fuente de verdad del proyecto.** Este archivo describe el sistema **tal como está implementado** (as-built). Úsalo para entender el funcionamiento y para decidir dónde tocar código.  
+> Última revisión: **2026-11-17** (contrastado con el monorepo).  
+> Compacto de mapa: `docs/00-ESTADO-ACTUAL.md`. Operación humana: `docs/MANUAL-DE-INSTALACION.md`.  
+> Los docs `docs/01`–`06` son roadmap/histórico (planes Next.js, etc.); **no** son el runtime.
+
+---
+
 ## Resumen Ejecutivo
 
-**SW Loyalty** es un sistema de programa de lealtad multi-tenant que permite a negocios (restaurantes, bares, etc.) gestionar tarjetas de fidelidad digitales para sus clientes. El sistema integra:
+**SW Loyalty** es un programa de lealtad digital **multi-tenant** (piloto: PANEM, slug `panem`). Una sola API y una sola BD; cada negocio se aísla por `tenant_id`.
 
-- Pases digitales en **Google Wallet** y **Apple Wallet**
-- Check-in por escaneo de **código QR**
-- Sistema de **niveles** (tiers) y **puntos**
-- **Tarjeta de sellos** (ciclos de visitas con recompensa)
-- Panel de **administración** completo
-- **Impresión térmica** de tickets (ESC/POS)
-- Soporte **multi-tenant** (múltiples marcas/negocios)
-- **Modo kiosco** para check-in automático desatendido en pantalla grande
+**En producción hoy:**
+- Registro de clientes con **Google Wallet** y **Apple Wallet** (`.pkpass`)
+- Check-in por **QR** (staff/iPad) y **modo kiosco** desatendido
+- Niveles (tiers), puntos y **tarjeta de sellos** (ciclos) por marca
+- Admin de marca + **Super Admin** de plataforma
+- Impresión térmica: **Print Bridge local** (camino operativo) + catálogo en BD
+- Portal de beneficios del cliente (link desde Wallet)
+- **Branding de tarjeta Wallet por tenant** (logo, banner iOS, colores, nombres)
+- Staff en PC: impresoras IP (barra vs cover), despacho de boletos de cover, kiosco con loop de fotos/video
 
-> **Estado**: Documento sincronizado con el código y la base de datos en producción. Cubre: modo kiosco, endpoint optimizado `/api/checkin/kiosk`, rate limiter de login ajustado, logo por defecto para Google Wallet, y el esquema real de la BD verificado en Supabase.
+**Stack real:** Vite + React (staff/admin) + Express (API) + Supabase. **No** hay Next.js ni Supabase Auth.
 
 ---
 
@@ -24,36 +32,66 @@
 │                        VERCEL (Hosting)                       │
 ├─────────────────┬──────────────────┬────────────────────────┤
 │  Frontend SPA   │   Admin Panel    │    Backend API          │
-│  (Staff Portal) │   (Admin SPA)    │    (Express.js)         │
+│  Staff/Kiosco   │   Admin + Super  │    Express.js           │
 │  React + Vite   │   React + Vite   │    Serverless Node.js   │
-│  :loyalty-staff │   :loyalty-admin │    :loyalty-api-rho     │
+│  loyalty-staff  │  loyalty-admin-  │    loyalty-api-rho      │
+│                 │  jet             │                         │
 └────────┬────────┴────────┬─────────┴──────────┬─────────────┘
          │                 │                     │
          └─────────────────┼─────────────────────┘
-                           │
+                           │  service role (bypassa RLS)
               ┌────────────▼────────────────┐
               │        Supabase             │
-              │  (PostgreSQL + Storage)     │
+              │  PostgreSQL + Storage       │
+              │  bucket: tenant-branding    │
               └────────────┬───────────────┘
                            │
          ┌─────────────────┼─────────────────┐
          │                 │                  │
-   ┌─────▼─────┐   ┌──────▼──────┐  ┌───────▼───────┐
-   │  Google    │   │   Apple     │  │   Impresoras  │
-   │  Wallet    │   │   Wallet    │  │   Térmicas    │
-   │  (API)     │   │   (PKPass)  │  │   (ESC/POS)   │
-   └────────────┘   └─────────────┘  └───────────────┘
+   ┌─────▼─────┐   ┌──────▼──────┐  ┌───────▼────────┐
+   │  Google    │   │   Apple     │  │ Print Bridge   │
+   │  Wallet    │   │   Wallet    │  │ PC del local   │
+   │  API       │   │   .pkpass   │  │ HTTPS :4001    │
+   └────────────┘   └─────────────┘  └───────┬────────┘
+                                             │ TCP :9100
+                                       ┌─────▼──────┐
+                                       │ Impresora  │
+                                       │ ESC/POS    │
+                                       └────────────┘
 ```
+
+**Entry points backend:**
+- Local: `backend/index.js` (`listen` si no hay `VERCEL`)
+- Vercel: `backend/api/index.js` reexporta la app
 
 ---
 
 ## URLs de Producción
 
-| Servicio | URL |
-|----------|-----|
-| Backend API | `https://loyalty-api-rho.vercel.app` |
-| Frontend (Staff/Client) | `https://loyalty-staff.vercel.app` |
-| Admin Panel | Desplegado en Vercel (URL propia) |
+| Servicio | URL | Puerto local |
+|----------|-----|----------------|
+| Backend API | `https://loyalty-api-rho.vercel.app` | 3000 |
+| Staff / registro / beneficios / kiosco | `https://loyalty-staff.vercel.app` | 5173 HTTPS |
+| Admin + Super Admin | `https://loyalty-admin-jet.vercel.app` | 5174 HTTPS |
+| Print Bridge | Solo LAN (no Vercel) | 4001 HTTPS |
+
+Fronts: `VITE_API_URL` vacío = paths relativos `/api/...` (válido con proxy Vite).
+
+---
+
+## Mapa del monorepo
+
+```
+loyalty/
+├── backend/          # API Express (local :3000 / Vercel serverless)
+├── frontend/         # Staff + kiosco + registro + beneficios (Vite :5173)
+├── admin/            # Panel marca + Super Admin (Vite :5174)
+├── print-bridge/     # Bridge HTTPS local → impresoras TCP :9100
+├── supabase/         # config.toml local (sin migrations SQL versionadas)
+├── docs/             # As-built corto + histórico 01–06 + manual
+├── SYSTEM_DOCUMENTATION.md  # Este archivo — documento final
+└── .agents/skills/   # Skills Supabase
+```
 
 ---
 
@@ -64,140 +102,148 @@
 | Tecnología | Versión | Propósito |
 |------------|---------|-----------|
 | Express.js | 5.x | Framework HTTP |
-| Supabase JS | 2.x | Cliente de base de datos |
-| jsonwebtoken | 9.x | Autenticación JWT |
+| Supabase JS | 2.x | Cliente de BD (service role) |
+| jsonwebtoken | 9.x | JWT propio |
 | bcrypt | 6.x | Hash de contraseñas |
 | google-auth-library | 10.x | Google Wallet API |
-| passkit-generator | 3.5.x | Apple Wallet .pkpass |
+| passkit-generator | 3.5.x | Apple Wallet `.pkpass` |
 | helmet | 8.x | Headers de seguridad |
-| express-rate-limit | 8.x | Limitación de solicitudes |
+| express-rate-limit | 8.x | Rate limit |
 | dotenv | 17.x | Variables de entorno |
 
-### Estructura de Archivos
+JSON body: límite **25 MB** (imágenes Wallet + videos del kiosco en base64).
+
+### Estructura de archivos
 
 ```
 backend/
-├── index.js                  # Entry point principal, endpoints core
-├── admin-routes.js           # Rutas CRUD admin (clientes, perks, promos, config, reportes)
-├── auth-routes.js            # Login, /me, cambio de password
-├── auth-middleware.js        # JWT middleware, generador de token
-├── super-admin-routes.js     # Gestión de tenants y usuarios de plataforma
-├── wallet.js                 # Integración Google Wallet (clases, pases, updates)
-├── apple-wallet.js           # Generación de pases Apple Wallet (.pkpass)
-├── tier-engine.js            # Lógica de niveles: resolución, cálculo de puntos
-├── cycle-engine.js           # Lógica de ciclos (tarjeta de sellos)
-├── print-service.js          # Servicio de impresión ESC/POS por TCP
-├── vercel.json               # Config de deploy serverless
-├── migrations/               # Migraciones SQL
-├── certs/                    # Certificados Apple Wallet (PEM)
-├── tests/                    # Tests con Vitest
+├── index.js                  # App Express, endpoints públicos/staff
+├── api/index.js              # Entry Vercel (reexporta app)
+├── admin-routes.js           # CRUD admin de marca
+├── auth-routes.js            # Login, /me, password
+├── auth-middleware.js        # JWT + roles
+├── super-admin-routes.js     # Tenants y usuarios de plataforma
+├── wallet.js                 # Google Wallet (clases, JWT, PATCH branding)
+├── apple-wallet.js           # Generación .pkpass con branding
+├── tier-engine.js            # Niveles y puntos
+├── cycle-engine.js           # Tarjeta de sellos
+├── print-service.js          # ESC/POS TCP (desde la API; en Vercel casi no llega a LAN)
+├── vercel.json
+├── migrations/               # 001–005 (JS que imprimen SQL si no hay RPC)
+├── certs/                    # Apple: signerCert.pem, signerKey.pem, wwdr.pem, icon.png
+├── tests/                    # Vitest
 └── package.json
 ```
 
-### Endpoints Principales
+### Endpoints
 
-#### Autenticación (`/api/auth/`)
+#### Autenticación (`/api/auth/`) — `auth-routes.js`
 
-| Método | Ruta | Descripción | Auth |
-|--------|------|-------------|------|
-| POST | `/api/auth/login` | Login (slug + username + password) | No |
-| GET | `/api/auth/me` | Perfil del usuario autenticado | JWT |
-| PUT | `/api/auth/password` | Cambiar contraseña | JWT |
+| Método | Ruta | Auth | Notas |
+|--------|------|------|-------|
+| POST | `/api/auth/login` | No | Con `slug` → usuario de esa marca. Sin `slug` → solo `super_admin` |
+| GET | `/api/auth/me` | JWT | |
+| PUT | `/api/auth/password` | JWT | |
 
-#### Clientes - Core (`/api/`)
+Rate limit login: **10 intentos / 15 min por IP**, `skipSuccessfulRequests: true`. API general: **100 req/min**. Bloqueo de cuenta: 5 fallos → 15 min (`auth-routes.js`). En Vercel el rate limit es por instancia (MemoryStore).
 
-| Método | Ruta | Descripción | Auth |
-|--------|------|-------------|------|
-| POST | `/api/customers` | Registrar nuevo cliente + crear Wallet Pass | No |
-| GET | `/api/customers/:id` | Perfil completo (perks + gifts) | No |
-| GET | `/api/customers/:id/benefits` | Portal público de beneficios | No |
-| GET | `/api/customers/:id/progress` | Progreso de tarjeta de sellos | No |
-| GET | `/api/customers/:id/apple-pass` | Descargar .pkpass de Apple Wallet | No |
-| POST | `/api/checkin` | Registrar visita (check-in) — flujo staff | No* |
-| POST | `/api/checkin/kiosk` | Check-in + perfil (perks+gifts) en **una sola llamada**, optimizado para modo kiosco | No* |
-| POST | `/api/redemption` | Canjear perk con puntos | No* |
-| POST | `/api/redemption/gift` | Redimir regalo directo (gratis) | No* |
-| GET | `/api/wallet/status` | Diagnóstico Google Wallet config | No |
-| POST | `/api/print` | Puente de impresión TCP | No |
+#### Público / staff (`index.js`)
 
-**Sobre `/api/checkin/kiosk`** (agregado para el modo kiosco): combina en una sola petición el check-in y la obtención de perks + regalos pendientes. Internamente ejecuta el insert del check-in y el update del cliente en **paralelo** (`Promise.all`), consulta perks y gifts en paralelo, y hace la actualización de Google Wallet y el auto-regalo como fire-and-forget. Esto reduce la latencia percibida (~300-500ms vs ~1s+ de los 2 requests secuenciales del flujo staff). Devuelve `{ checkin, customer, perks, pendingGifts }`.
+Estos endpoints **no usan JWT**. El aislamiento es por `tenant_slug` y/o UUID del cliente.
 
-*Estos endpoints validan `tenant_slug` para aislamiento entre negocios.
+| Método | Ruta | Notas |
+|--------|------|-------|
+| GET | `/` | Health |
+| GET | `/api/wallet/status` | Diagnóstico Google Wallet |
+| POST | `/api/customers` | Registro + Wallet. `tenant_slug` **obligatorio**; tenant debe estar activo |
+| GET | `/api/customers/:id` | Perfil (staff). Query `tenant_slug` para isolation |
+| GET | `/api/customers/:id/benefits` | Portal cliente (solo lectura) |
+| GET | `/api/customers/:id/progress` | Sellos/ciclo. ⚠️ Lee `loyalty_config` **sin** filtrar `tenant_id` |
+| GET | `/api/customers/:id/apple-pass` | Descarga `.pkpass` con logo/strip/colores del tenant |
+| GET | `/api/cover-products` | Boletos de cover activos (`tenant_slug`) |
+| POST | `/api/cover-products/:id/dispatch` | Registra impresión de cover |
+| GET | `/api/kiosk/display` | Media + logo del kiosco (`tenant_slug`) |
+| POST | `/api/checkin` | Visita staff: puntos + ciclo + rollback parcial |
+| POST | `/api/checkin/kiosk` | Check-in + perks + gifts en **una** llamada |
+| POST | `/api/redemption` | Canje por puntos. ⚠️ No exige `tenant_slug`; no siempre escribe `tenant_id` en `redemptions` |
+| POST | `/api/redemption/gift` | Marca `direct_gifts.redeemed_at` |
+| POST | `/api/print` | TCP directo desde la API (útil solo si el proceso ve la LAN) |
 
-#### Admin (`/api/admin/`)
+`/api/checkin` y `/api/checkin/kiosk` **validan tenant solo si llega `tenant_slug`**. El staff/kiosco sí lo envían (`localStorage.staff_slug`).
 
-Todos requieren JWT con rol `owner`, `admin` o `staff`.
+**`POST /api/checkin/kiosk`:** insert de check-in + update de cliente en paralelo; perks y gifts en paralelo; Wallet y auto-regalo Platino fire-and-forget. Respuesta: `{ checkin, customer, perks, pendingGifts }`.
 
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| GET | `/stats` | Dashboard: total clientes, check-ins hoy, canjes del mes |
-| GET | `/birthdays` | Cumpleaños del mes actual |
-| GET | `/checkins/recent` | Últimos 10 check-ins |
-| GET | `/customers` | Lista de clientes del tenant |
-| GET | `/customers/export` | Exportar clientes con último check-in |
-| PUT | `/customers/:id` | Editar cliente |
-| GET/POST/PUT/DELETE | `/perks[/:id]` | CRUD de beneficios canjeables |
-| GET/POST/PUT/DELETE | `/promotions[/:id]` | CRUD de promociones |
-| GET/PUT | `/config` | Configuración del programa de lealtad |
-| GET/PUT | `/branding` | Branding de Wallet (colores, nombres) |
-| POST | `/branding/image` | Subir imagen (logo/strip/icon) |
-| GET/POST/PUT/DELETE | `/tiers[/:id]` | CRUD de niveles de lealtad |
-| GET | `/reports/:type` | Reportes (visits, top_customers, redemptions, birthdays) |
-| GET | `/reports/tiers` | Distribución de clientes por nivel |
-| GET | `/reports/cycle-rewards` | Recompensas por ciclo (paginado) |
+#### Admin (`/api/admin/`) — JWT `owner` \| `admin` \| `staff`
 
-#### Super Admin (`/api/super/`)
-
-Requiere JWT con rol `super_admin`.
+Todas filtran por `req.tenantId`.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/tenants` | Listar todos los tenants |
-| POST | `/tenants` | Crear tenant (+ config + tiers default) |
-| PUT | `/tenants/:id` | Actualizar tenant |
-| GET | `/tenants/:id/users` | Listar usuarios de un tenant |
-| POST | `/tenants/:id/users` | Crear usuario admin |
-| PUT | `/users/:id` | Actualizar usuario |
-| DELETE | `/users/:id` | Desactivar usuario (soft delete) |
+| GET | `/stats` | Clientes, check-ins hoy, canjes del mes |
+| GET | `/birthdays` | Cumpleaños del mes |
+| GET | `/checkins/recent` | Últimos 10 |
+| GET | `/customers` | Lista |
+| GET | `/customers/export` | Excel / último check-in |
+| PUT | `/customers/:id` | Editar |
+| PUT | `/customers/:id/tier` | Cambio de nivel (auditoría en `tier_change_history`) |
+| DELETE | `/customers/:id` | Borra cliente y tablas relacionadas |
+| POST | `/gifts` | Cortesía: puntos (suman al saldo) o perk (queda pendiente) |
+| GET/POST/PUT/DELETE | `/perks[/:id]` | Premios |
+| GET/POST/PUT/DELETE | `/promotions[/:id]` | CRUD. **El check-in no las aplica** |
+| GET/PUT | `/config` | `points_per_visit`, `program_name`, ciclo, reward. Al guardar `program_name` también actualiza `tenants.wallet_program_name` |
+| GET/PUT | `/branding` | Nombres y colores Wallet + `kiosk_media` |
+| POST | `/branding/image` | Sube logo/strip/icon al bucket `tenant-branding` |
+| POST/DELETE | `/branding/kiosk-media` | Fotos/videos del loop del kiosco |
+| GET/POST/PUT/DELETE | `/cover-products[/:id]` | Catálogo de boletos de cover |
+| GET/POST/PUT/DELETE | `/tiers[/:id]` | Niveles |
+| GET | `/reports/:type` | `visits`, `top_customers`, `redemptions`, `birthdays` |
+| GET | `/reports/tiers` | Distribución por nivel |
+| GET | `/reports/cycle-rewards` | Recompensas de ciclo (paginado) |
+| GET/POST/PUT/DELETE | `/printers[/:id]` | Catálogo BD |
+| POST | `/printers/:id/test` | Ticket de prueba (TCP desde API) |
+
+`max_checkins_per_day` existe en BD y lo usa el check-in; **no hay campo en Admin → Configuración** (se cambia en SQL o ampliando el PUT `/config`).
+
+#### Super Admin (`/api/super/`) — solo `super_admin`
+
+| Método | Ruta |
+|--------|------|
+| GET/POST | `/tenants` |
+| PUT | `/tenants/:id` |
+| GET/POST | `/tenants/:id/users` |
+| PUT/DELETE | `/users/:id` |
+
+Al crear tenant: inserta `tenants` (`wallet_class_id` = `{ISSUER}.Loyalty_{slug}`), `loyalty_config` default y 4 tiers.
 
 ### Seguridad
 
-- **Helmet**: Headers HTTP de seguridad
-- **CORS**: Restringido a `ALLOWED_ORIGINS`
-- **Rate Limiting**: 100 req/min global; login limitado a **10 intentos/15 min por IP** con `skipSuccessfulRequests: true` (los logins exitosos no cuentan contra el límite, para no penalizar a usuarios que aciertan tras un par de errores)
-- **Bloqueo de cuenta**: 5 intentos fallidos → bloqueo 15 min (protección anti-fuerza-bruta a nivel de cuenta, independiente del rate limit por IP)
-- **Nota operativa**: el rate limiter usa almacén en memoria (MemoryStore). En Vercel (serverless) los contadores viven por instancia y se limpian al reciclarse o con un redeploy. Un 429 en login suele ser bloqueo de IP, no de cuenta.
-- **Validación de email**: Bloquea dominios desechables (60+ dominios)
-- **JWT**: Tokens con expiración de 24h, roles embebidos
-- **Contraseñas**: bcrypt con 12 salt rounds
-- **Aislamiento multi-tenant**: Cada request validada contra `tenant_id` del JWT
+- Helmet + CORS (`ALLOWED_ORIGINS`; si está vacío, CORS abierto)
+- Rate limit y bloqueo de cuenta (arriba)
+- Email: formato + TLD + **60+ dominios desechables**
+- Teléfono: 10 dígitos MX
+- JWT 24h con `tenant_id`, `tenant_slug`, `role`
+- bcrypt 12 rounds
+- Autorización real en aplicación (service role **bypassa RLS**)
 
-### Variables de Entorno (Backend)
+### Variables de entorno (backend)
 
 ```env
-# Supabase
-SUPABASE_URL=https://xxxxx.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+JWT_SECRET=
+PORT=3000
+ALLOWED_ORIGINS=https://loyalty-staff.vercel.app,https://loyalty-admin-jet.vercel.app
+CLIENT_PORTAL_URL=https://loyalty-staff.vercel.app
 
-# Google Wallet
 GOOGLE_ISSUER_ID=3388000000023147315
 GOOGLE_CLASS_ID=3388000000023147315.Loyalty_PANEM
-GCP_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
-# Opcional: logo por defecto para tenants sin logo propio (Google exige programLogo válido).
-# Si no se define, se usa un logo genérico alojado en el bucket público de Supabase.
+GCP_SERVICE_ACCOUNT_JSON={...}   # o archivo gcp-service-account.json
 DEFAULT_WALLET_LOGO_URL=https://<proyecto>.supabase.co/storage/v1/object/public/tenant-branding/_defaults/logo.png
 
-# Apple Wallet
 APPLE_TEAM_ID=7S87DS9Z82
-
-# Auth
-JWT_SECRET=your-secret-key
-
-# Server
-PORT=3000
-ALLOWED_ORIGINS=https://loyalty-staff.vercel.app,https://loyalty-admin.vercel.app
-CLIENT_PORTAL_URL=https://loyalty-staff.vercel.app
 ```
+
+No hay `.env.example` en el repo. No commitear `.env` ni certs nuevos.
 
 ---
 
@@ -205,647 +251,530 @@ CLIENT_PORTAL_URL=https://loyalty-staff.vercel.app
 
 ### Tecnologías
 
-| Tecnología | Versión | Propósito |
-|------------|---------|-----------|
-| React | 19.x | UI Library |
-| Vite | 8.x | Build tool |
-| React Router | 7.x | Routing |
-| html5-qrcode | 2.x | Escaneo QR |
-| Axios | 1.x | HTTP Client |
-| Lucide React | 1.x | Iconos |
+React 19, Vite 8, React Router 7, html5-qrcode, Axios, Lucide.
+
+Dev: **HTTPS :5173**, proxy `/api` → `http://127.0.0.1:3000`. `VITE_API_URL` opcional.
 
 ### Estructura
 
 ```
-frontend/
-├── src/
-│   ├── App.jsx                    # Flujo principal: Login → Scanner → Profile
-│   ├── main.jsx                   # Entry point
-│   ├── components/
-│   │   ├── Scanner.jsx            # Escáner QR con html5-qrcode
-│   │   ├── CustomerProfile.jsx    # Perfil post-scan: check-in, canjes, regalos
-│   │   ├── KioskMode.jsx          # Modo kiosco: check-in automático + countdown configurable
-│   │   ├── StaffLogin.jsx         # Login staff (slug + user + pass)
-│   │   └── PrinterConfig.jsx      # Configuración método de impresión
-│   ├── pages/
-│   │   ├── Register.jsx           # Registro público de clientes (?tenant=slug)
-│   │   └── Benefits.jsx           # Portal público de beneficios (/benefits/:id)
-│   └── utils/
-│       ├── printer.js             # 3 métodos de impresión: browser/serial/network
-│       └── useBarcodeScanner.js   # Hook lector USB HID + helpers extractCustomerId/isValidCustomerId
-├── vercel.json
-└── package.json
+frontend/src/
+├── App.jsx                    # Login → Scanner/Profile o KioskMode
+├── main.jsx                   # Rutas: /  /register  /benefits/:id
+├── components/
+│   ├── Scanner.jsx            # Cámara html5-qrcode
+│   ├── CustomerProfile.jsx    # Check-in, canjes, cortesías, print local
+│   ├── KioskMode.jsx          # Check-in automático + countdown
+│   ├── StaffLogin.jsx         # slug + user + pass
+│   ├── PrinterConfig.jsx      # IP + rol barra/cover + Print Bridge
+│   ├── CoverDispatch.jsx      # Despacho de boletos de cover
+│   └── KioskBranding.jsx      # Loop fotos/video en espera
+├── pages/
+│   ├── Register.jsx           # Público; ?tenant= obligatorio
+│   └── Benefits.jsx           # Portal cliente
+└── utils/
+    ├── printer.js             # browser / serial / Print Bridge
+    └── useBarcodeScanner.js   # Lector USB HID (keyboard-wedge)
 ```
 
-### Flujos de Usuario
+**Auth UI:** `staff_token` solo oculta/muestra la app. Check-in y canjes **no envían Bearer**; mandan `tenant_slug` desde `localStorage.staff_slug`.
 
-#### Staff (Aplicación Principal)
-1. Login con slug del negocio + credenciales
-2. Vista de escáner QR activa
-3. Al escanear: muestra perfil del cliente con:
-   - Datos (nombre, visitas, puntos)
-   - Botón "Registrar Visita" (check-in)
-   - Cortesías pendientes (redimibles gratis)
-   - Perks canjeables con puntos
-4. Al canjear: imprime ticket automáticamente
+Storage staff: `staff_token`, `staff_slug`, `staff_tenant_name`.
 
-#### Cliente - Registro (`/register?tenant=slug`)
-1. Formulario: nombre, email, teléfono, fecha cumpleaños
-2. Validaciones client-side y server-side
-3. Al crear: recibe botones para agregar a Google Wallet / Apple Wallet
+### Flujos
 
-#### Cliente - Beneficios (`/benefits/:customerId`)
-1. Vista pública accesible desde el pase digital
-2. Muestra puntos, perks disponibles, regalos pendientes
+#### Staff
+1. Login (slug del negocio + usuario + password)
+2. Escáner (cámara). Lector USB HID como **método secundario** en esta vista
+3. Perfil: visita, cortesías pendientes, perks
+4. Al canjear: impresión local (`printer.js`)
 
-#### Modo Kiosco (check-in automático, pantalla grande)
-Pensado para montar el sistema en una pantalla grande sin hostess. Se activa desde el header del Staff Portal (icono de monitor → panel de configuración → "Activar Modo Kiosco").
+#### Registro (`/register?tenant=slug`)
+Sin query `tenant` → error (no hay default a `panem`). Formulario + validaciones. Respuesta: `saveUrl` (Google) + `applePassUrl`.
 
-1. Pantalla completa con escáner QR permanente
-2. Al escanear un QR válido, ejecuta el check-in **automáticamente** vía `POST /api/checkin/kiosk` (una sola llamada)
-3. Muestra pantalla de resultado: bienvenida, puntos, visitas, nivel, progreso de ciclo y recompensa de ciclo si aplica
-4. Si el cliente tiene beneficios (cortesías o perks canjeables), los muestra para redimir en el momento
-5. **Countdown de inactividad configurable** (default 20s, rango 5–120s): cada interacción del usuario lo **reinicia desde cero**; si no hay interacción, regresa automáticamente al escáner al llegar a 0
-6. Soporta escaneo por **lector USB** (principal) y **cámara** (secundario) simultáneamente
+#### Beneficios (`/benefits/:customerId`)
+Vista pública desde el pase.
 
-Detalles de comportamiento:
-- **Countdown = temporizador de inactividad**: cualquier interacción (tap, scroll, movimiento, redención) reinicia el contador al timeout completo. Esto garantiza flujo continuo sin que el contador se quede estático mientras el cliente navega sus beneficios.
-- El timeout se guarda en `localStorage` (`kiosk_timeout`), persiste entre recargas
-- Los puntos mostrados usan un estado `currentPoints` que se actualiza tras cada redención, evitando mostrar saldos desactualizados
-- La lista de perks se re-evalúa contra `currentPoints`: si tras un canje ya no alcanza, el perk desaparece
-- Un flag `processingRef` evita check-ins concurrentes (doble escaneo del lector/cámara)
-- En error (QR inválido, límite diario, etc.) muestra el mensaje 5s y vuelve al escáner
-- Botón "Volver al escáner" para regresar manualmente y botón discreto "Salir del modo kiosco"
+#### Modo kiosco
+Header staff → icono monitor → timeout 5–120 s (default 20, `localStorage.kiosk_timeout`) → Activar.
 
-### Métodos de Impresión
+- Pantalla completa, escáner permanente
+- QR válido → `POST /api/checkin/kiosk`
+- Resultado: bienvenida, puntos, visitas, nivel, ciclo, cortesías/perks
+- **Countdown de inactividad:** cada interacción **reinicia** el contador al timeout completo (no lo pausa)
+- USB HID = **método principal** en kiosco; cámara solo si hay dispositivo (o preferencia `kiosk_camera`)
+- Pantalla de espera: loop de fotos/videos (`tenants.kiosk_media`) a pantalla completa
+- `processingRef` evita doble check-in
+- Error: mensaje 5 s y vuelve al escáner
+- Salir: botón discreto
 
-| Método | Descripción | Compatibilidad |
-|--------|-------------|----------------|
-| Browser | Genera HTML en iframe oculto, usa `window.print()` | iOS/iPad/Desktop |
-| Serial | Web Serial API directo a impresora USB ESC/POS | Chrome Desktop |
-| Network | HTTP a un Print Bridge (relay HTTP→TCP) | Cualquier dispositivo |
+### Escaneo QR
 
-### Métodos de Escaneo de QR
+| Método | Cómo | Dónde |
+|--------|------|--------|
+| USB HID | El lector “teclea” el UUID + Enter; `useBarcodeScanner` detecta ráfagas &lt; 50 ms | Principal en kiosco; secundario en staff |
+| Cámara | `html5-qrcode` | Principal en staff; respaldo en kiosco |
 
-El sistema soporta **dos métodos de escaneo que coexisten** (no se reemplazan):
+El QR del pase es el **UUID del cliente**. Si el texto trae puntos (formato Google `issuerId.customerId`), se usa el último segmento (`extractCustomerId`).
 
-| Método | Cómo funciona | Uso principal |
-|--------|---------------|---------------|
-| **Lector USB** (HID) | Lector omnidireccional USB (keyboard-wedge): el SO lo ve como teclado, "teclea" el contenido del código + Enter. Capturado por el hook `useBarcodeScanner` que detecta ráfagas rápidas terminadas en Enter | Kiosco desatendido (All-in-One con lector fijo) — **método principal** |
-| **Cámara** (`html5-qrcode`) | Acceso a la cámara del dispositivo, decodifica el QR por video | Respaldo / dispositivos móviles — **método secundario** |
+### Impresión en el iPad/staff (camino operativo)
 
-**Hook `useBarcodeScanner`** (`frontend/src/utils/useBarcodeScanner.js`):
-- Escucha `keydown` globalmente; acumula caracteres que llegan en < 50ms entre sí
-- Al recibir Enter, si el buffer tiene longitud suficiente, dispara `onScan(code)`
-- Ignora la escritura en inputs/textarea (evita falsos positivos)
-- Se activa/desactiva con `{ enabled }` según la vista (solo escucha en la fase de escaneo)
-- No requiere drivers ni permisos: el lector se comporta como teclado
-- Recomendación de hardware: el lector debe enviar **Enter** como sufijo (configuración estándar)
+Config local en `PrinterConfig` (no es el CRUD de Admin → Impresoras).
 
-Ambos métodos están activos tanto en el **Modo Kiosco** como en el **flujo normal de staff**.
+| Método | Uso |
+|--------|-----|
+| Browser | `window.print()` — iOS/iPad |
+| Serial | Web Serial USB ESC/POS — Chrome desktop |
+| Network | HTTPS al **Print Bridge** `:4001` (en la misma PC: `https://127.0.0.1:4001`) → TCP :9100 |
+
+Cada impresora IP tiene rol:
+
+| Rol | Qué imprime |
+|-----|-------------|
+| **Barra** | Canjes y cortesías — **todas** las impresoras de barra |
+| **Cover** | Boletos de acceso — **una sola** impresión en esa impresora |
+
+El nombre del negocio sale del tenant (`staff_tenant_name`), ya no “PANEM” fijo.
 
 ---
 
 ## 3. Admin Panel (`admin/`)
 
-### Tecnologías
+React 19 + Vite 8 + `qrcode`. Dev: **HTTPS :5174**, mismo proxy `/api`.  
+`VITE_API_URL`, `VITE_STAFF_PORTAL_URL` (default `https://loyalty-staff.vercel.app` para el QR de registro).
 
-Mismas que el frontend + `qrcode` (generación de QR codes).
+Cliente HTTP: `admin/src/api.js` → `/api/admin` + Bearer `admin_token`.
 
 ### Estructura
 
 ```
-admin/
-├── src/
-│   ├── App.jsx                        # Router: super_admin vs admin
-│   ├── api.js                         # Axios instance con auth interceptor
-│   ├── components/
-│   │   ├── Layout.jsx                 # Shell con sidebar para admin
-│   │   └── SuperAdminLayout.jsx       # Shell para super admin
-│   └── pages/
-│       ├── Login.jsx                  # Login admin
-│       ├── Dashboard.jsx              # Stats: clientes, check-ins, canjes
-│       ├── Customers.jsx              # Lista/edición de clientes
-│       ├── Perks.jsx                  # CRUD beneficios canjeables
-│       ├── Promotions.jsx             # CRUD promociones temporales
-│       ├── TierConfig.jsx             # Configuración de niveles
-│       ├── Config.jsx                 # Config programa (ciclos, nombre)
-│       ├── Printers.jsx               # Gestión de impresoras de red
-│       ├── Reports.jsx                # Reportes (visitas, top, canjes, etc.)
-│       ├── SuperAdmin.jsx             # Gestión de tenants (plataforma)
-│       └── SuperAdminUsers.jsx        # Gestión usuarios por tenant
-├── vercel.json
-└── package.json
+admin/src/
+├── App.jsx                  # Sin token → Login. super_admin → UI plataforma (sin rutas /super)
+├── api.js
+├── components/Layout.jsx    # Sidebar marca
+├── components/SuperAdminLayout.jsx
+└── pages/
+    ├── Login.jsx
+    ├── Dashboard.jsx
+    ├── Customers.jsx        # Edición, tier, gifts, export, delete
+    ├── Perks.jsx
+    ├── Promotions.jsx
+    ├── TierConfig.jsx
+    ├── Config.jsx           # QR registro + ciclo + **Tarjeta Wallet** + password
+    ├── Printers.jsx         # Catálogo BD
+    ├── Reports.jsx
+    ├── SuperAdmin.jsx
+    └── SuperAdminUsers.jsx
 ```
 
-### Roles y Permisos
+### Rutas de marca
 
-| Rol | Acceso |
-|-----|--------|
-| `super_admin` | Gestión de tenants, usuarios de plataforma |
-| `owner` | Todo el panel admin de su tenant |
-| `admin` | Todo el panel admin de su tenant |
-| `staff` | Todo el panel admin de su tenant |
+| Path | Página |
+|------|--------|
+| `/` | Dashboard |
+| `/customers` | Clientes |
+| `/perks` | Premios |
+| `/promotions` | Promociones (solo CRUD) |
+| `/reports` | Reportes |
+| `/tiers` | Niveles |
+| `/printers` | Impresoras BD |
+| `/kiosk` | Boletos de cover + media loop del kiosco |
+| `/config` | Programa + branding Wallet + QR de registro + password |
 
----
+### Branding Wallet (Admin → Configuración)
 
-## 4. Base de Datos (Supabase/PostgreSQL)
+Cada tenant personaliza la tarjeta iOS/Android:
 
-### Esquema de Tablas
+- Nombres: `wallet_program_name`, `wallet_issuer_name`
+- Colores: fondo, texto, etiquetas (si no hay texto/label, el `.pkpass` calcula contraste)
+- Imágenes PNG/JPEG ≤ 2 MB → Storage `tenant-branding/{tenant_id}/{logo\|strip\|icon}.ext`
+- Preview aproximado de iOS en la misma pantalla
 
-#### `tenants`
-Tabla central de multi-tenancy. Cada negocio es un tenant.
+Al guardar branding se intenta `PATCH` de la Loyalty Class de Google. **Apple no actualiza pases ya descargados**; el cliente debe volver a añadir la tarjeta.
 
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador único |
-| slug | VARCHAR (unique) | Identificador URL-friendly |
-| name | VARCHAR | Nombre del negocio |
-| is_active | BOOLEAN | Si el programa está activo |
-| wallet_class_id | VARCHAR | ID de Loyalty Class en Google Wallet |
-| wallet_issuer_name | VARCHAR | Nombre del emisor en Wallet |
-| wallet_program_name | VARCHAR | Nombre del programa en Wallet |
-| wallet_bg_color | VARCHAR(7) | Color de fondo (#RRGGBB) |
-| wallet_fg_color | VARCHAR(7) | Color de texto |
-| wallet_label_color | VARCHAR(7) | Color de labels |
-| wallet_logo_url | TEXT | URL del logo |
-| wallet_strip_url | TEXT | URL de la imagen strip |
-| wallet_icon_url | TEXT | URL del ícono |
-| logo_url | TEXT | Logo del negocio |
-| primary_color, secondary_color, accent_color, text_color, background_color | VARCHAR | Colores de marca |
-| created_at, updated_at | TIMESTAMPTZ | Timestamps |
+El CSS de staff/admin y los tickets térmicos **no** aplican aún `primary_color` / `logo_url` del tenant.
 
-#### `customers`
-Clientes registrados en el programa de lealtad.
+### Roles
 
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | ID del cliente (usado en QR). Default `uuid_generate_v4()` |
-| tenant_id | UUID (FK→tenants) | Negocio al que pertenece |
-| name | TEXT | Nombre completo |
-| email | TEXT (UNIQUE global) | ⚠️ La restricción UNIQUE es **global**, no por tenant. El backend además valida duplicados por (tenant_id + email) en el registro |
-| phone | TEXT | Teléfono (10 dígitos MX) |
-| birthday | DATE | Fecha de cumpleaños |
-| visits_count | INTEGER | Total de visitas acumuladas (default 0) |
-| points_balance | INTEGER | Saldo de puntos actual (default 0) |
-| wallet_pass_id | TEXT (UNIQUE) | ID del objeto en Google Wallet |
-| tier_id | UUID (FK→loyalty_tiers, NOT NULL) | Nivel actual |
-| cycle_visits_count | INTEGER (CHECK >=0) | Visitas del ciclo actual (default 0) |
-| cycles_completed | INTEGER (CHECK >=0) | Ciclos completados total (default 0) |
-| is_active | BOOLEAN | Cliente activo (default true) |
-| notes | TEXT | Notas internas del admin (default '') |
-| created_at | TIMESTAMPTZ | Fecha de registro (default now()) |
-
-#### `loyalty_tiers`
-Niveles de lealtad configurables por tenant.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant dueño |
-| name | VARCHAR(50) | Nombre (único por tenant) |
-| points_per_visit | INTEGER (1-1000) | Puntos otorgados por visita |
-| benefit_description | VARCHAR(200) | Descripción del beneficio del nivel |
-| sort_order | INTEGER | Orden de visualización |
-| is_default | BOOLEAN | Si es el nivel inicial |
-| created_at, updated_at | TIMESTAMPTZ | Timestamps |
-
-**Default Tiers:** Bronce (3pts), Plata (5pts), Oro (10pts), Platino (10pts + regalo)
-
-#### `loyalty_config`
-Configuración del programa por tenant.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | INTEGER (PK) | Identificador (default 1) |
-| tenant_id | UUID (UNIQUE, FK→tenants) | Tenant (una config por tenant) |
-| points_per_visit | INTEGER | Puntos por visita (legacy, default 10; los puntos reales vienen del tier) |
-| program_name | TEXT | Nombre del programa (default 'Loyalty PANEM') |
-| cycle_visits_required | INTEGER (CHECK 2-50) | Visitas para completar un ciclo (default 10) |
-| cycle_reward_perk_id | UUID (FK→perks, nullable) | Perk de recompensa al completar ciclo |
-| max_checkins_per_day | INTEGER | Límite de check-ins diarios (default 1; 0=ilimitado) |
-| updated_at | TIMESTAMPTZ | Última actualización (default now()) |
-
-#### `checkins`
-Registro de visitas.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant |
-| customer_id | UUID (FK→customers) | Cliente |
-| scanned_by | VARCHAR | Quien registró ("Staff") |
-| created_at | TIMESTAMPTZ | Fecha/hora del check-in |
-
-#### `perks`
-Beneficios canjeables con puntos.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador (default `uuid_generate_v4()`) |
-| tenant_id | UUID (FK→tenants) | Tenant |
-| name | TEXT | Nombre del beneficio |
-| description | TEXT | Descripción |
-| cost_points | INTEGER | Costo en puntos |
-| cost_visits | INTEGER | Costo alternativo en visitas (nullable) |
-| is_active | BOOLEAN | Si está disponible (default true) |
-| created_at | TIMESTAMPTZ | Creación (default now()) |
-
-#### `redemptions`
-Registro de canjes de perks.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant |
-| customer_id | UUID (FK→customers) | Cliente |
-| perk_id | UUID (FK→perks) | Beneficio canjeado |
-| redeemed_by | VARCHAR | Quien procesó el canje |
-| created_at | TIMESTAMPTZ | Fecha del canje |
-
-#### `direct_gifts`
-Regalos/cortesías directas (no requieren puntos).
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant |
-| customer_id | UUID (FK→customers) | Cliente beneficiado |
-| type | TEXT (CHECK 'points'/'perk') | Tipo de regalo |
-| points_amount | INTEGER | Si tipo=points, cantidad regalada (default 0) |
-| perk_id | UUID (FK→perks, nullable) | Si tipo=perk, cuál beneficio |
-| reason | TEXT | Motivo del regalo |
-| given_by | TEXT | Quien lo otorgó ('system' para auto-regalos) |
-| redeemed_at | TIMESTAMPTZ | Null si no se ha redimido |
-| created_at | TIMESTAMPTZ | Creación (default now()) |
-
-#### `promotions`
-Promociones temporales configurables.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador (default `gen_random_uuid()`) |
-| tenant_id | UUID (FK→tenants) | Tenant |
-| name | TEXT | Nombre de la promoción |
-| description | TEXT | Descripción |
-| type | TEXT (CHECK) | Tipo: `double_points`, `bonus_points` o `free_perk` |
-| value | INTEGER | Valor de la promoción (default 0) |
-| perk_id | UUID (FK→perks, nullable) | Perk asociado (para `free_perk`) |
-| start_date | TIMESTAMPTZ | Fecha/hora inicio |
-| end_date | TIMESTAMPTZ | Fecha/hora fin |
-| is_active | BOOLEAN | Activa/inactiva (default true) |
-| days_of_week | INTEGER[] | Días válidos [0-6] (default `[]`) |
-| created_at | TIMESTAMPTZ | Creación (default now()) |
-
-#### `admin_users`
-Usuarios administrativos del sistema.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID (nullable) | Null = super_admin |
-| username | VARCHAR (unique per tenant) | Nombre de usuario |
-| password_hash | VARCHAR | Hash bcrypt |
-| email | VARCHAR | Email |
-| role | VARCHAR | 'super_admin', 'owner', 'admin', 'staff' |
-| is_active | BOOLEAN | Activo (soft delete) |
-| failed_attempts | INTEGER | Intentos fallidos de login |
-| locked_until | TIMESTAMPTZ | Bloqueo temporal |
-| last_login | TIMESTAMPTZ | Último login exitoso |
-| created_at | TIMESTAMPTZ | Creación |
-
-#### `tier_change_history`
-Auditoría de cambios de nivel.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant |
-| customer_id | UUID (FK→customers) | Cliente |
-| previous_tier_id | UUID (FK→loyalty_tiers) | Nivel anterior |
-| new_tier_id | UUID (FK→loyalty_tiers, NOT NULL) | Nuevo nivel |
-| changed_by | VARCHAR(100) | Quien hizo el cambio |
-| change_source | VARCHAR(20) | 'manual' o 'system' |
-| created_at | TIMESTAMPTZ | Fecha del cambio |
-
-**RLS**: Habilitada, policy para service_role.
-
-#### `cycle_rewards`
-Registro de ciclos completados.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador |
-| tenant_id | UUID | Tenant |
-| customer_id | UUID (FK→customers) | Cliente |
-| cycle_number | INTEGER | Número de ciclo completado |
-| perk_id | UUID (FK→perks) | Recompensa otorgada (nullable) |
-| created_at | TIMESTAMPTZ | Fecha de completación |
-
-**UNIQUE**: (tenant_id, customer_id, cycle_number)
-**RLS**: Habilitada, policy para service_role.
-
-#### `printers`
-Impresoras térmicas configuradas.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador (default `gen_random_uuid()`) |
-| tenant_id | UUID (FK→tenants) | Tenant |
-| name | VARCHAR | Nombre descriptivo |
-| ip_address | VARCHAR | IP de la impresora |
-| port | INTEGER | Puerto (default 9100) |
-| is_active | BOOLEAN | Activa (default true) |
-| print_on_checkin | BOOLEAN | Imprimir en check-in (default **false**) |
-| print_on_redemption | BOOLEAN | Imprimir en canje (default **true**) |
-| print_on_cycle_reward | BOOLEAN | Imprimir en recompensa de ciclo (default **true**) |
-| created_at | TIMESTAMPTZ | Creación (default now()) |
-
-#### `admin_sessions`
-Tabla de sesiones (presente en la BD; el flujo actual de auth es stateless con JWT, por lo que normalmente no se usa. Se conserva para compatibilidad / posible invalidación de tokens).
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| id | UUID (PK) | Identificador (default `gen_random_uuid()`) |
-| token | TEXT (UNIQUE) | Token de sesión |
-| created_at | TIMESTAMPTZ | Creación (default now()) |
-| expires_at | TIMESTAMPTZ | Expiración |
-
-### Row Level Security (RLS)
-
-**Todas las tablas del esquema `public` tienen RLS habilitado.** El backend opera con la **service role key** de Supabase, que **bypassa RLS**, por lo que toda la autorización real (aislamiento por tenant, roles) se hace en la capa de aplicación (middleware + filtros `.eq('tenant_id', ...)`). Las tablas `tier_change_history` y `cycle_rewards` tienen además políticas explícitas para `service_role`.
-
-> ⚠️ Importante: como la seguridad depende de la capa de aplicación y de la service role key, **nunca** se debe exponer esa key al frontend ni permitir acceso directo del cliente a la BD.
+| Rol | `tenant_id` | Acceso |
+|-----|-------------|--------|
+| `super_admin` | `NULL` | Marcas y usuarios de marca |
+| `owner` / `admin` / `staff` | UUID | Todo el panel de su tenant (hoy no hay diferencia de menú por rol) |
 
 ---
 
-## 5. Integraciones Externas
+## 4. Print Bridge (`print-bridge/`)
+
+Proceso **en la PC del local**, no en Vercel. El iPad llama HTTPS `:4001`; el bridge abre TCP a la impresora.
+
+| Método | Ruta | Body |
+|--------|------|------|
+| GET | `/` | Health `{ status, port }` |
+| POST | `/print` | `{ ip, port, data }` ESC/POS |
+
+Puerto: `PRINT_BRIDGE_PORT` (default **4001**). Certificado self-signed en `print-bridge/.certs/`.  
+Servicio Windows: `install-service.js` / `uninstall-service.js`.
+
+`printToAllPrinters` en el backend (tras canje, etc.) **no filtra `tenant_id`** y desde Vercel **casi nunca alcanza la LAN**. El flujo real de tickets es staff → Print Bridge.
+
+---
+
+## 5. Base de Datos (Supabase/PostgreSQL)
+
+No hay `supabase/migrations/` SQL versionado. El esquema vive en producción + scripts `backend/migrations/001`–`005`.
+
+### `tenants`
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| id | UUID (PK) | |
+| slug | VARCHAR unique | URL-friendly |
+| name | VARCHAR | |
+| is_active | BOOLEAN | |
+| wallet_class_id | VARCHAR | Loyalty Class Google (`…Loyalty_{slug}`) |
+| wallet_issuer_name | VARCHAR | Emisor |
+| wallet_program_name | VARCHAR | Texto del pase |
+| wallet_bg_color | VARCHAR | Fondo `#RRGGBB` |
+| wallet_fg_color | VARCHAR | Texto (opcional) |
+| wallet_label_color | VARCHAR | Etiquetas (opcional) |
+| wallet_logo_url | TEXT | Logo (Google + Apple `logo.png`) |
+| wallet_strip_url | TEXT | Banner iOS; si falta, se genera degradado |
+| wallet_icon_url | TEXT | Icono notificaciones Apple |
+| kiosk_media | JSONB | Loop del kiosco: `[{ url, type: 'image'\|'video' }]` |
+| logo_url, primary_color, secondary_color, accent_color, text_color, background_color | | Branding UI de apps **aún no usado** |
+| created_at, updated_at | TIMESTAMPTZ | |
+
+Storage público: bucket **`tenant-branding`**.
+
+### `customers`
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| id | UUID (PK) | Contenido del QR. Default `uuid_generate_v4()` |
+| tenant_id | UUID FK | |
+| name, email, phone, birthday | | Email UNIQUE **global** en BD; el registro también valida duplicado por (tenant + email) |
+| visits_count | INTEGER | Default 0 |
+| points_balance | INTEGER | Default 0 |
+| wallet_pass_id | TEXT unique | Objeto Google Wallet |
+| tier_id | UUID FK NOT NULL | |
+| cycle_visits_count | INTEGER ≥0 | Sellos del ciclo actual |
+| cycles_completed | INTEGER ≥0 | |
+| is_active | BOOLEAN | |
+| notes | TEXT | |
+| created_at | TIMESTAMPTZ | |
+
+**No hay ascenso automático de tier por visitas** — solo `PUT /customers/:id/tier`.
+
+### `loyalty_tiers`
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| id | UUID | |
+| tenant_id | UUID | |
+| name | VARCHAR(50) unique por tenant | |
+| points_per_visit | INTEGER 1–1000 | Puntos reales del check-in |
+| benefit_description | VARCHAR(200) | Si contiene `"regalo"` (case insensitive) → auto `direct_gifts` en check-in |
+| sort_order | INTEGER | |
+| is_default | BOOLEAN | Nivel al registrarse |
+| created_at, updated_at | | |
+
+Default al crear tenant: Bronce (3), Plata (5), Oro (10), Platino (10 + texto de regalo).
+
+### `loyalty_config`
+
+Una fila por tenant.
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| id | INTEGER | |
+| tenant_id | UUID unique FK | |
+| points_per_visit | INTEGER | Legacy; el check-in usa el del **tier** |
+| program_name | TEXT | |
+| cycle_visits_required | INTEGER 2–50 | Default 10 |
+| cycle_reward_perk_id | UUID FK perks nullable | |
+| max_checkins_per_day | INTEGER | Default 1; **0 = ilimitado**. No expuesto en UI |
+| updated_at | TIMESTAMPTZ | |
+
+### `checkins` / `perks` / `redemptions` / `direct_gifts` / `promotions`
+
+- `checkins`: visita (`tenant_id`, `customer_id`, `scanned_by`, `created_at`)
+- `perks`: premio (`cost_points`, `cost_visits` nullable, `is_active`)
+- `redemptions`: canje por puntos
+- `direct_gifts`: `type` `points` \| `perk`; `redeemed_at` null = pendiente; `given_by` `admin` o `system`
+- `promotions`: `double_points` \| `bonus_points` \| `free_perk` + fechas/días. **CRUD only**
+
+### `admin_users`
+
+| Columna | Notas |
+|---------|-------|
+| tenant_id | `NULL` = super_admin |
+| username | Unique por tenant |
+| password_hash | bcrypt |
+| role | `super_admin` \| `owner` \| `admin` \| `staff` |
+| failed_attempts, locked_until, last_login, is_active | |
+
+### `tier_change_history` / `cycle_rewards`
+
+- Historial de nivel (`change_source` `manual` \| `system`). RLS + policy `service_role`
+- Ciclos completados: UNIQUE `(tenant_id, customer_id, cycle_number)`. Completar ciclo **escribe `cycle_rewards`**, **no** crea `direct_gifts` canjeable. ⚠️ `cycle-engine` inserta `tenant_id` con UUID cero (`DEFAULT_TENANT_ID`)
+
+### `printers`
+
+Catálogo por tenant: IP, puerto 9100, flags `print_on_checkin` (default false), `print_on_redemption` / `print_on_cycle_reward` (default true).
+
+### `cover_products` / `cover_tickets`
+
+Boletos de acceso del staff portal. `cover_products`: catálogo por tenant (`name`, `is_active`, `sort_order`). `cover_tickets`: log de cada despacho.
+
+### `admin_sessions`
+
+Legacy. Auth actual es JWT stateless.
+
+### RLS
+
+Todas las tablas `public` tienen RLS. El backend usa **service role → bypass**. La seguridad es filtro `.eq('tenant_id', …)` en código. **Nunca** exponer la service role al frontend.
+
+### Migraciones en repo
+
+| Script | Qué |
+|--------|-----|
+| `001_create_loyalty_tiers.js` | Tiers + seed (`npm run migrate` solo corre esta) |
+| `002_...` | Columnas ciclo/tier en customers |
+| `003_...` | Ciclo en loyalty_config |
+| `004_...` | `tier_change_history` + `cycle_rewards` + RLS |
+| `005_apple_wallet_branding.js` | `wallet_strip_url`, `wallet_icon_url`, `wallet_fg_color`, `wallet_label_color` + bucket `tenant-branding` |
+| `006_cover_products_and_kiosk_media.js` | `cover_products`, `cover_tickets`, `tenants.kiosk_media` |
+
+Si no existe RPC `exec_sql`, el script imprime el SQL para el Dashboard.
+
+---
+
+## 6. Integraciones externas
 
 ### Google Wallet
 
-- **Tipo**: Loyalty Card (LoyaltyObject + LoyaltyClass)
-- **Autenticación**: Service Account con scope `wallet_object.issuer`
-- **Flujo de creación**: "Fat JWT" — el objeto se incluye completo en el JWT y se crea cuando el usuario lo agrega
-- **Contenido del pase**:
-  - QR Code: UUID del cliente (para escaneo en check-in)
-  - Puntos (loyalty points)
-  - Visitas del ciclo (secondary loyalty points)
-  - Módulos de texto: Nivel, Progreso de ciclo
-  - Link: Portal de beneficios del cliente
-- **Actualizaciones**: Fire-and-forget con retry (0s, 5s, 30s) — no bloquea flujo principal
-- **Multi-tenant**: Cada tenant tiene su propia Loyalty Class (`Loyalty_{slug}`), creada automáticamente al registrar el primer cliente del tenant
-- **⚠️ `programLogo` obligatorio**: Google **rechaza** la creación de una LoyaltyClass sin un logo válido (URL que cargue). Si el tenant no tiene `wallet_logo_url`, se usa un **logo por defecto** alojado en el bucket público de Supabase (`tenant-branding/_defaults/logo.png`), configurable con `DEFAULT_WALLET_LOGO_URL`. Anteriormente se usaba una URL de ejemplo de Google que dejó de cargar y provocaba fallos de registro en tenants sin logo.
+- LoyaltyClass + LoyaltyObject. Scope `wallet_object.issuer`
+- **Fat JWT**: el objeto se crea al guardar el pase
+- QR = UUID del cliente; puntos; visitas de ciclo; módulos Nivel/Progreso; link a `/benefits/:id`
+- Updates: fire-and-forget con retry 0s / 5s / 30s
+- Una class por tenant (`Loyalty_{slug}`), se crea al primer registro
+- **`programLogo` obligatorio.** Sin `wallet_logo_url` http(s) se usa `DEFAULT_WALLET_LOGO_URL` (bucket `tenant-branding/_defaults/logo.png`)
+- `updateLoyaltyClassBranding` al guardar branding en Admin
 
 ### Apple Wallet
 
-- **Tipo**: Store Card (storeCard)
-- **Generación**: Serverless, se genera el .pkpass al vuelo
-- **Certificados**: PEM files en `backend/certs/` (signerCert, signerKey, wwdr)
-- **Pass Type ID**: `pass.com.sw-pos.loyalty`
-- **Team ID**: `7S87DS9Z82`
-- **Contenido del pase**:
-  - QR Code (format PKBarcodeFormatQR): UUID del cliente
-  - Header: Puntos
-  - Primary: Nombre del cliente
-  - Secondary: Nivel + Visitas (progreso)
-  - Back: ID membresía, Programa, Marca, URL beneficios
-- **Branding dinámico**: Colores del tenant, logo/strip/icon remotos
-- **Strip image**: Si no se configura, genera un PNG degradado programáticamente
+- Tipo `storeCard`. Pass Type ID `pass.com.sw-pos.loyalty`. Team ID `7S87DS9Z82` (o `APPLE_TEAM_ID`)
+- Se genera **al vuelo** en `GET /api/customers/:id/apple-pass`
+- Certs PEM en `backend/certs/` (passphrase del signer: `loyalty2024`)
+- Header: puntos reales. Primary: nombre. Secondary: nivel + `visitas/ciclo`
+- Back: ID, programa, marca, URL beneficios
+- Imágenes embebidas: `icon` / `logo` / `strip` (`@2x`/`@3x`). Sin strip → PNG degradado del color de marca
+- Colores: `backgroundColor` del tenant; fg/label override o contraste automático
+- **Sin webServiceURL / push:** el pase es estático. Check-in y branding nuevo **no** actualizan el pase ya en el iPhone
 
-### Impresión Térmica (ESC/POS)
+### Impresión ESC/POS
 
-- **Protocolo**: TCP directo a impresora (puerto 9100)
-- **Formatos**: ESC/POS estándar (inicialización, centrado, doble tamaño, bold, corte)
-- **Eventos de impresión**: check-in, redemption, cycle_reward
-- **Backend**: Envía a todas las impresoras activas que coincidan con el tipo de evento
-- **Frontend**: 3 métodos (browser/serial/network) con fallback automático
+Dos capas:
+
+1. **Operativa:** iPad → Print Bridge `:4001` → TCP impresora
+2. **Catálogo admin + `printToAllPrinters`:** la API intenta TCP; en Vercel suele fallar y además no filtra tenant
 
 ---
 
-## 6. Flujos de Datos Principales
+## 7. Flujos de datos
 
-### Registro de Cliente
-
-```
-[Formulario Register.jsx]
-    ↓ POST /api/customers {name, email, phone, birthday, tenant_slug}
-[Validaciones]
-    → Validar tenant_slug → encontrar tenant activo
-    → Validar email (formato + dominio no desechable + TLD válido)
-    → Validar teléfono (10 dígitos MX)
-    → Verificar duplicados por email+tenant
-[Creación]
-    → Obtener tier default del tenant
-    → Generar UUID para el cliente
-    → Crear Google Wallet pass (Fat JWT)
-    → Insertar en BD (customers)
-    → Retornar: customer + saveUrl (Google) + applePassUrl
-```
-
-### Check-in (Visita)
+### Registro
 
 ```
-[Scanner.jsx] → escanea QR del pase
-    ↓ extrae customer UUID
-[CustomerProfile.jsx] → GET /api/customers/:id
-    ↓ muestra perfil
-[Click "Registrar Visita"]
-    ↓ POST /api/checkin {customerId, scannedBy, tenant_slug}
-[Proceso en backend]
-    1. Obtener cliente + validar tenant isolation
-    2. Verificar límite diario (max_checkins_per_day)
-    3. Resolver nivel del cliente (tier-engine)
-    4. Calcular puntos según nivel
-    5. Insertar registro en `checkins`
-    6. Actualizar visits_count y points_balance
-    7. Procesar ciclo (cycle-engine):
-       - Incrementar cycle_visits_count
-       - Si completa: reset, incrementar cycles_completed, crear reward
-    8. Auto-regalo si es Platino
-    9. Actualizar Google Wallet (async, fire-and-forget)
-    10. Retornar: puntos, visitas, nivel, progreso ciclo, auto-gifts
+Register.jsx ?tenant=slug
+  → POST /api/customers { name, email, phone, birthday, tenant_slug }
+  → tenant activo, email, teléfono, unique email+tenant
+  → tier is_default, UUID, Fat JWT Google, INSERT customers
+  → { customer, saveUrl, applePassUrl }
 ```
 
-### Check-in Kiosco (automático, optimizado)
+`applePassUrl` apunta a `https://loyalty-api-rho.vercel.app/api/customers/{id}/apple-pass` (dominio público, no `VERCEL_URL`).
+
+### Check-in staff
 
 ```
-[KioskMode.jsx] → escáner QR permanente
-    ↓ QR válido detectado (valida formato UUID en cliente)
-    ↓ POST /api/checkin/kiosk {customerId, scannedBy:'Kiosk', tenant_slug}
-[Proceso en backend — una sola llamada]
-    1. Obtener cliente + validar tenant isolation
-    2. Config + límite diario (una query)
-    3. Resolver tier y calcular puntos
-    4. PARALELO: insert checkin  +  update customer (visits/points)
-    5. Procesar ciclo (cycle-engine)
-    6. PARALELO: obtener perks activos  +  regalos pendientes
-    7. Fire-and-forget: update Google Wallet + auto-regalo Platino
-    8. Retornar { checkin, customer, perks, pendingGifts }
-[KioskMode.jsx]
-    → Muestra resultado + beneficios
-    → Countdown configurable (localStorage kiosk_timeout, default 20s)
-    → Interacción pausa countdown; al expirar vuelve al escáner
+Scanner → GET /api/customers/:id?tenant_slug=
+  → POST /api/checkin { customerId, scannedBy, tenant_slug }
+  1. Isolation si hay slug
+  2. max_checkins_per_day (default 1)
+  3. Puntos = loyalty_tiers.points_per_visit
+  4. INSERT checkins + UPDATE visits/points (con rollback si falla después)
+  5. processCycleStep → cycle_rewards al completar (no direct_gifts)
+  6. Si benefit_description contiene "regalo" → direct_gifts
+  7. PATCH Google Wallet async
 ```
 
-### Canje de Beneficio (Redemption)
+### Check-in kiosco
 
-```
-[CustomerProfile.jsx] → click en perk
-    ↓ POST /api/redemption {customerId, perkId, redeemedBy, tenant_slug}
-[Proceso]
-    1. Obtener perk y validar que esté activo
-    2. Validar que el cliente tiene puntos suficientes
-    3. Descontar puntos del balance
-    4. Insertar registro en `redemptions`
-    5. Actualizar Google Wallet (async)
-    6. Imprimir en impresoras configuradas (backend)
-    7. Retornar datos del ticket
-[Frontend]
-    → Imprime ticket localmente (printer.js)
-```
+Igual en negocio; una sola request `/api/checkin/kiosk`; insert+update en paralelo; incluye perks y pendingGifts en la respuesta.
 
-### Ciclo / Tarjeta de Sellos
+### Canje
 
-```
-[Durante check-in]
-    → processCycleStep(supabase, customerId, cycleConfig)
-    → Incrementa cycle_visits_count
-    → Si newCount >= cycle_visits_required:
-        → Reset cycle_visits_count a 0
-        → Incrementa cycles_completed
-        → Inserta en cycle_rewards
-        → Opcionalmente vincula un perk como recompensa
-    → Retorna: {completed, rewardName, cycleNumber, newCycleVisitsCount}
-```
+Puntos: descuenta balance + `redemptions` + print local + Wallet async.  
+Gift: `redeemed_at` + print.  
+Admin gifts: `POST /api/admin/gifts`.
+
+### Ciclo (sellos)
+
+`processCycleStep`: incrementa `cycle_visits_count`; al llegar a `cycle_visits_required` resetea a 0, sube `cycles_completed`, inserta `cycle_rewards` (con `DEFAULT_TENANT_ID` hoy).
 
 ---
 
-## 7. Sistema Multi-Tenant
+## 8. Multi-tenant
 
-### Creación de Tenant
-
-Cuando un super_admin crea un nuevo negocio:
-1. Se inserta en `tenants` con slug, nombre y wallet_class_id auto-generado
-2. Se crea `loyalty_config` con valores default (10 pts/visita, ciclo de 10)
-3. Se crean 4 `loyalty_tiers` default (Bronce, Plata, Oro, Platino)
-4. Se puede crear un usuario `owner` para el negocio
-
-### Aislamiento
-
-- Cada request autenticada incluye `tenant_id` en el JWT
-- Middleware inyecta `req.tenantId` en todas las rutas admin
-- Queries siempre filtran por `.eq('tenant_id', req.tenantId)`
-- Endpoints públicos usan `tenant_slug` como parámetro para resolver el tenant
-- Un cliente pertenece exactamente a un tenant
+- Una BD, columna `tenant_id`
+- JWT inyecta `req.tenantId` en admin
+- Público: `tenant_slug` en body/query
+- Un cliente = un tenant
+- Super admin crea marca + config + 4 tiers; luego usuarios `owner`/`admin`/`staff`
 
 ---
 
-## 8. Deployment
+## 9. Deployment
 
-### Vercel Configuration
+**Backend** `backend/vercel.json`: `@vercel/node` sobre `api/index.js`, rewrite `/(.*)`.
 
-**Backend** (`backend/vercel.json`):
-```json
-{
-  "version": 2,
-  "builds": [{ "src": "api/index.js", "use": "@vercel/node" }],
-  "routes": [{ "src": "/(.*)", "dest": "/api/index.js" }]
-}
-```
-Express se exporta como `module.exports = app` para funcionar como serverless function.
+**Fronts:** SPA rewrite a `index.html`.
 
-**Frontend/Admin** (`vercel.json`):
-```json
-{
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
-}
-```
-SPA con client-side routing.
-
-### Variables de Entorno por Servicio
-
-| Servicio | Variables Requeridas |
-|----------|---------------------|
-| Backend | SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, GOOGLE_ISSUER_ID, GCP_SERVICE_ACCOUNT_JSON, APPLE_TEAM_ID, ALLOWED_ORIGINS, CLIENT_PORTAL_URL |
-| Frontend | VITE_API_URL |
-| Admin | VITE_API_URL |
+| Servicio | Env |
+|----------|-----|
+| Backend | `SUPABASE_*`, `JWT_SECRET`, `GOOGLE_*`, `GCP_SERVICE_ACCOUNT_JSON`, `APPLE_TEAM_ID`, `ALLOWED_ORIGINS`, `CLIENT_PORTAL_URL`, opcional `DEFAULT_WALLET_LOGO_URL` |
+| Frontend | `VITE_API_URL` |
+| Admin | `VITE_API_URL`, `VITE_STAFF_PORTAL_URL` |
+| Print Bridge | `PRINT_BRIDGE_PORT` (4001) |
 
 ---
 
-## 9. Reportes Disponibles
+## 10. Reportes
 
-| Reporte | Endpoint | Descripción |
-|---------|----------|-------------|
-| Visitas | `/reports/visits?from=&to=` | Historial de check-ins con fecha/hora/cliente |
-| Top Customers | `/reports/top_customers` | Top 20 clientes por visitas |
-| Canjes | `/reports/redemptions?from=&to=` | Historial de redemptions |
-| Cumpleaños | `/reports/birthdays` | Clientes con cumpleaños este mes |
-| Tiers | `/reports/tiers` | Distribución de clientes por nivel |
-| Cycle Rewards | `/reports/cycle-rewards?from=&to=&page=` | Recompensas otorgadas (paginado) |
-
----
-
-## 10. Configuraciones Clave del Admin
-
-| Configuración | Dónde | Descripción |
-|---------------|-------|-------------|
-| Nombre del programa | Config / Branding | Se sincroniza con Wallet |
-| Puntos por visita | Tier Config | Definido por nivel (no global) |
-| Visitas por ciclo | Config | 2–50, define la "tarjeta de sellos" |
-| Recompensa de ciclo | Config | Perk que se otorga al completar ciclo |
-| Max check-ins/día | Config | Previene abuso (default: 1) |
-| Colores de Wallet | Branding | bg, fg, label — se aplican a todos los pases |
-| Imágenes de Wallet | Branding | Logo, Strip, Icon — para Google y Apple |
-| Impresoras | Printers | IP/puerto + qué eventos imprimir |
-| Niveles | Tiers | 1-10 niveles con puntos customizables |
-| Modo Kiosco | Staff Portal (frontend) | Activación + timeout configurable (5–120s), guardado en localStorage del dispositivo |
+| Reporte | Endpoint |
+|---------|----------|
+| Visitas | `/reports/visits?from=&to=` |
+| Top 20 | `/reports/top_customers` |
+| Canjes | `/reports/redemptions?from=&to=` |
+| Cumpleaños | `/reports/birthdays` |
+| Tiers | `/reports/tiers` |
+| Cycle rewards | `/reports/cycle-rewards?from=&to=&page=` |
 
 ---
 
 ## 11. Testing
 
-- **Framework**: Vitest
-- **Tipo**: Tests de propiedades (property-based testing con fast-check)
-- **Ubicación**: `backend/tests/`
-- **Ejecución**: `npm run test` (single run) o `npm run test:properties`
+Vitest + fast-check (motores, **no** rutas HTTP).
 
----
-
-## 12. Comandos de Desarrollo
+```
+backend/tests/tier-engine.test.js
+backend/tests/cycle-engine.test.js
+backend/tests/wallet.test.js
+backend/tests/apple-wallet.test.js   # helpers de color/strip PNG
+backend/tests/properties/setup.test.js
+```
 
 ```bash
-# Backend
-cd backend
-npm install
-npm run dev          # nodemon con hot reload (Puerto 3000)
-
-# Frontend
-cd frontend
-npm install
-npm run dev          # Vite dev server
-
-# Admin
-cd admin
-npm install
-npm run dev          # Vite dev server
-
-# Migraciones
-cd backend
-npm run migrate      # Ejecuta migration 001
-
-# Tests
-cd backend
-npm test             # Vitest single run
+cd backend && npm test
 ```
 
 ---
 
-## Notas Importantes para Implementadores
+## 12. Comandos de desarrollo
 
-1. **Supabase Service Role**: El backend usa el service role key (bypassa RLS). Nunca exponerla al frontend.
-2. **Google Wallet Class**: Se crea automáticamente si no existe al registrar el primer cliente de un tenant. Requiere un `programLogo` válido: si el tenant no tiene logo, se usa el logo default del bucket (`DEFAULT_WALLET_LOGO_URL`). Un tenant sin logo y sin default válido fallará al registrar clientes.
-3. **Apple Wallet Certs**: Deben estar en `backend/certs/` (signerCert.pem, signerKey.pem, wwdr.pem). Passphrase: `loyalty2024`.
-4. **UUID como QR**: El contenido del código QR en los pases es simplemente el UUID del cliente. El scanner extrae el último segmento si contiene puntos (formato Google: `issuerId.customerId`).
-5. **Fire-and-forget**: Las actualizaciones de Wallet no bloquean el flujo. Si fallan, se reintentan silenciosamente.
-6. **Timezone**: Todas las fechas en UTC (TIMESTAMPTZ). El frontend formatea a `es-MX`.
-7. **Puntos por nivel**: Los puntos se calculan según el `points_per_visit` del tier actual del cliente, no de la config global.
+```bash
+# Terminal 1 — API
+cd backend && npm run dev          # :3000
+
+# Terminal 2 — Staff / kiosco / registro
+cd frontend && npm run dev         # :5173 HTTPS
+
+# Terminal 3 — Admin
+cd admin && npm run dev            # :5174 HTTPS
+
+# Opcional — impresión LAN
+cd print-bridge && node index.js   # :4001 HTTPS
+```
+
+```bash
+cd backend
+npm run migrate    # solo 001
+npm test
+```
+
+---
+
+## 13. Guía para cambiar el sistema
+
+1. Leer **este archivo**. No reimplementar planes de `docs/01`–`06` sin contrastarlos.
+2. Operación humana → `docs/MANUAL-DE-INSTALACION.md`.
+3. **Nuevo endpoint admin** → `admin-routes.js` + página en `admin/src/pages` + ítem en `Layout.jsx`.
+4. **Público/staff/kiosco** → `index.js` + consumo en `frontend`.
+5. **Plataforma (marcas/users)** → `super-admin-routes.js` + SuperAdmin*.
+6. **Schema** → script en `backend/migrations/` + SQL en Dashboard si no hay `exec_sql` + actualizar este doc.
+7. **Siempre** filtrar `tenant_id`. No confiar en RLS con service role.
+8. Impresión en local → Print Bridge `:4001`, no TCP desde Vercel.
+9. Tras cambios estructurales, actualizar **este archivo** y el mapa `docs/00-ESTADO-ACTUAL.md`.
+
+---
+
+## 14. Qué está hecho vs no
+
+| Tema | Estado |
+|------|--------|
+| Multi-tenant + Super Admin | Hecho |
+| JWT + roles | Hecho (staff ve el mismo menú admin que owner) |
+| Tiers + ciclos | Hecho; tier no sube solo |
+| Kiosco | Hecho |
+| Print Bridge + catálogo impresoras | Hecho |
+| Google + Apple al alta | Hecho |
+| Branding Wallet por tenant | Hecho (Admin → Configuración) |
+| CSS/logo dinámico en staff/admin | No |
+| Tickets con nombre del tenant | No (hardcode PANEM) |
+| Push/update Apple tras check-in | No |
+| Promociones en check-in | No (solo CRUD) |
+| Completar ciclo → cortesía canjeable | No (solo `cycle_rewards`) |
+| Transferencia de puntos | No |
+| Next.js / Stripe | No |
+
+---
+
+## 15. Deuda / gotchas (al tocar código)
+
+1. Endpoints de negocio sin JWT: isolation débil si falta `tenant_slug`.
+2. `DEFAULT_TENANT_ID` (`00000000-…`) en `tier-engine` / `cycle-engine` puede contaminar `cycle_rewards.tenant_id`.
+3. `GET /api/customers/:id/progress` lee `loyalty_config` sin `.eq('tenant_id')`.
+4. `printToAllPrinters` no filtra tenant; TCP desde Vercel a LAN suele fallar.
+5. Insert de redención por puntos a veces omite `tenant_id`.
+6. Ciclo completo ≠ `direct_gifts`.
+7. Promociones no entran al check-in.
+8. Apple estático: re-añadir el pase tras branding o para ver puntos nuevos.
+9. Unique de email en BD es **global**; el código valida por tenant.
+10. Certificados Apple / `.p12` / service accounts: no versionar secretos nuevos.
+11. UI a veces menciona puerto `3001`; el bridge real es **4001**.
+12. `max_checkins_per_day` no está en la UI de Config.
+
+---
+
+## 16. Inventario de docs
+
+| Archivo | Usar para |
+|---------|-----------|
+| **`SYSTEM_DOCUMENTATION.md`** | Documento final: funcionamiento + dónde cambiar |
+| `docs/00-ESTADO-ACTUAL.md` | Mapa corto as-built (apunta aquí) |
+| `docs/MANUAL-DE-INSTALACION.md` | Instalación y uso operativo |
+| `docs/01`–`06` | Roadmap/histórico; verificar contra este archivo |
+
+---
+
+## Notas para implementadores
+
+1. **Service role** solo en backend.
+2. Google exige `programLogo` válido; sin logo de tenant usa el default del bucket.
+3. Certs Apple en `backend/certs/`. Icon de fallback: `certs/icon.png`.
+4. QR = UUID del cliente.
+5. Updates de Google Wallet no bloquean el check-in.
+6. Fechas en UTC (`TIMESTAMPTZ`); UI `es-MX`.
+7. Puntos de visita = `points_per_visit` del **tier**, no de `loyalty_config`.
+8. Banner iOS recomendado: PNG **750×246**. Logo ~320×100 o cuadrado.

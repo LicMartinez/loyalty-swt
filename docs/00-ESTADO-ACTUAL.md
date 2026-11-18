@@ -1,7 +1,7 @@
 # SW Loyalty — Estado Actual del Proyecto (As-Built)
 
-> **Fuente de verdad técnica.** Léela antes de explorar el código.  
-> Última actualización: 2026-08-14  
+> **Mapa corto.** El documento final (funcionamiento + dónde cambiar código) es **`SYSTEM_DOCUMENTATION.md`** en la raíz del repo.  
+> Última actualización: 2026-11-17  
 > Estado: **plataforma multi-tenant operativa** (Vite + Express + Supabase), no el MVP single-tenant ni el plan Next.js de docs antiguas.
 
 ---
@@ -12,11 +12,13 @@ Programa de lealtad digital multi-tenant para negocios (piloto: **PANEM**, slug 
 
 **Capacidades en producción:**
 - Registro de clientes con Google Wallet + Apple Wallet (`.pkpass`)
-- Scanner QR (staff/iPad) → check-in, puntos, canjes, cortesías
+- Scanner QR (staff/iPad) y **modo kiosco** → check-in, puntos, canjes, cortesías
 - Niveles (tiers) y ciclos/sellos configurables por marca
 - Admin de marca + Super Admin de plataforma
 - Impresión térmica (Print Bridge local + catálogo de impresoras en BD)
 - Portal de beneficios del cliente (link desde Wallet)
+- Branding de tarjeta Wallet por tenant (Admin → Configuración)
+- Staff PC: impresoras IP (barra vs cover), boletos de cover, loop de branding en kiosco
 
 ---
 
@@ -29,7 +31,8 @@ loyalty/
 ├── admin/            # Panel admin + Super Admin (Vite :5174, HTTPS)
 ├── print-bridge/     # Bridge HTTPS local → impresoras TCP :9100 (:4001)
 ├── supabase/         # config.toml local (sin migrations SQL en repo)
-├── docs/             # Documentación (este archivo = as-built)
+├── SYSTEM_DOCUMENTATION.md  # Documento final del sistema
+├── docs/             # Mapa corto (este archivo) + histórico 01–06 + manual
 └── .agents/skills/   # Skills Supabase del proyecto
 ```
 
@@ -143,7 +146,7 @@ JWT 24h: `tenant_id`, `tenant_slug`, `role`, etc. (`auth-middleware.js`).
 
 | Ruta | Archivo | Auth UI | Notas |
 |------|---------|---------|-------|
-| `/` | `App.jsx` + Scanner / CustomerProfile | `staff_token` | Check-in, canje, print |
+| `/` | `App.jsx` + Scanner / CustomerProfile / **KioskMode** | `staff_token` | Check-in, kiosco, canje, print |
 | `/register?tenant=slug` | `pages/Register.jsx` | Público | **Slug obligatorio** en query (`?tenant=`). Sin slug → error (no default a `panem`) |
 | `/benefits/:customerId` | `pages/Benefits.jsx` | Público | Solo lectura |
 
@@ -188,7 +191,7 @@ El resto de UIs (staff/admin CSS, tickets térmicos) **aún no** aplican brandin
 | GET | `/me` | JWT |
 | PUT | `/password` | JWT |
 
-Rate limit login: 5 / 15 min. API general: 100 / min.
+Rate limit login: **10 / 15 min** (`skipSuccessfulRequests`). API general: 100 / min. Bloqueo de cuenta: 5 fallos → 15 min.
 
 ### Super — `/api/super` (`super-admin-routes.js`) — solo `super_admin`
 
@@ -217,6 +220,7 @@ Todas filtran por `req.tenantId` del JWT.
 | GET | `/api/customers/:id/progress` | Sellos/ciclo |
 | GET | `/api/customers/:id/apple-pass` | Descarga `.pkpass` con logo/strip/colores del tenant |
 | POST | `/api/checkin` | Visita + puntos + ciclo |
+| POST | `/api/checkin/kiosk` | Check-in + perks + gifts en una llamada |
 | POST | `/api/redemption` | Canje por puntos |
 | POST | `/api/redemption/gift` | Canje cortesía pendiente |
 | POST | `/api/print` | TCP directo (solo útil si API ve la LAN) |
@@ -341,6 +345,7 @@ Credenciales de negocio y secrets: `backend/.env` (no commitear). Uso humano: ve
 | `003_...` | Config de ciclo en loyalty_config |
 | `004_...` | `tier_change_history` + `cycle_rewards` + RLS |
 | `005_apple_wallet_branding.js` | `wallet_strip_url`, `wallet_icon_url`, `wallet_fg_color`, `wallet_label_color` + bucket `tenant-branding` |
+| `006_cover_products_and_kiosk_media.js` | Cover products + kiosk_media |
 
 Runner: intentan RPC/`exec_sql`; si fallan imprimen SQL para Dashboard. `npm run migrate` solo ejecuta el `001`.
 
@@ -396,7 +401,7 @@ Comando: `cd backend && npm test`. Sin tests de integración HTTP.
 
 ## 17. Guía rápida para agentes / futuros cambios
 
-1. Leer **este archivo** primero; no re-mapear todo el monorepo.
+1. Leer **`SYSTEM_DOCUMENTATION.md`** (documento final). Este archivo es el mapa corto.
 2. Operación humana → `MANUAL-DE-INSTALACION.md`.
 3. Roadmap/histórico → docs `01`–`06` (verificar contra este as-built antes de implementar “planes”).
 4. Cambios de schema → preferir scripts en `backend/migrations/` y documentar aquí.
@@ -412,7 +417,8 @@ Comando: `cd backend && npm test`. Sin tests de integración HTTP.
 
 | Archivo | Usar para |
 |---------|-----------|
-| **`00-ESTADO-ACTUAL.md`** | Contexto técnico actual (este) |
+| **`SYSTEM_DOCUMENTATION.md`** | Documento final del sistema |
+| **`00-ESTADO-ACTUAL.md`** | Mapa corto as-built (este) |
 | `MANUAL-DE-INSTALACION.md` | Instalación y uso operativo |
 | `01-arquitectura-saas.md` | Plan Next.js (histórico) |
 | `02-modelo-datos-multitenant.md` | Diseño schema antiguo (parcialmente obsoleto) |

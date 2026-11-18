@@ -374,7 +374,7 @@ router.get('/branding', adminAuth, async (req, res) => {
     const supabase = req.app.locals.supabase;
     try {
         const { data, error } = await supabase.from('tenants')
-            .select('id, slug, name, logo_url, wallet_program_name, wallet_issuer_name, wallet_bg_color, wallet_fg_color, wallet_label_color, wallet_logo_url, wallet_strip_url, wallet_icon_url')
+            .select('id, slug, name, logo_url, wallet_program_name, wallet_issuer_name, wallet_bg_color, wallet_fg_color, wallet_label_color, wallet_logo_url, wallet_strip_url, wallet_icon_url, kiosk_media')
             .eq('id', req.tenantId)
             .single();
         if (error) throw error;
@@ -495,6 +495,169 @@ router.post('/branding/image', adminAuth, async (req, res) => {
         wallet.updateLoyaltyClassBranding(tenant).catch(() => {});
 
         res.json({ url: publicUrl, tenant });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.post('/branding/kiosk-media', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    const { contentType, data } = req.body || {};
+    if (!data || typeof data !== 'string') {
+        return res.status(400).json({ error: 'Falta el archivo (data base64)' });
+    }
+    const mime = String(contentType || '').toLowerCase();
+    const extMap = {
+        'image/png': 'png',
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/webp': 'webp',
+        'video/mp4': 'mp4',
+        'video/webm': 'webm',
+    };
+    const ext = extMap[mime];
+    if (!ext) {
+        return res.status(400).json({ error: 'Formatos: PNG, JPEG, WebP, MP4 o WebM' });
+    }
+    const isVideo = mime.startsWith('video/');
+    const maxBytes = isVideo ? 20 * 1024 * 1024 : 4 * 1024 * 1024;
+    const base64 = data.replace(/^data:[^;]+;base64,/, '');
+    let buffer;
+    try {
+        buffer = Buffer.from(base64, 'base64');
+    } catch {
+        return res.status(400).json({ error: 'Base64 inválido' });
+    }
+    if (buffer.length < 24 || buffer.length > maxBytes) {
+        return res.status(400).json({ error: isVideo ? 'El video no puede superar 20 MB' : 'La imagen no puede superar 4 MB' });
+    }
+
+    try {
+        await ensureBrandingBucket(supabase);
+        await supabase.storage.updateBucket(BRANDING_BUCKET, {
+            public: true,
+            fileSizeLimit: '26214400',
+            allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm'],
+        }).catch(() => {});
+
+        const filename = `kiosk/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const pathName = `${req.tenantId}/${filename}`;
+        const { error: upErr } = await supabase.storage
+            .from(BRANDING_BUCKET)
+            .upload(pathName, buffer, { contentType: mime, upsert: false });
+        if (upErr) throw upErr;
+
+        const { data: pub } = supabase.storage.from(BRANDING_BUCKET).getPublicUrl(pathName);
+        const item = { url: pub.publicUrl, type: isVideo ? 'video' : 'image', name: filename };
+
+        const { data: tenant } = await supabase.from('tenants')
+            .select('kiosk_media')
+            .eq('id', req.tenantId)
+            .single();
+        const media = Array.isArray(tenant?.kiosk_media) ? tenant.kiosk_media : [];
+        media.push(item);
+
+        const { data: updated, error } = await supabase.from('tenants')
+            .update({ kiosk_media: media, updated_at: new Date().toISOString() })
+            .eq('id', req.tenantId)
+            .select('kiosk_media')
+            .single();
+        if (error) throw error;
+        res.json({ item, kiosk_media: updated.kiosk_media });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.delete('/branding/kiosk-media', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    const url = String(req.body?.url || '').trim();
+    if (!url) return res.status(400).json({ error: 'Falta url' });
+    try {
+        const { data: tenant } = await supabase.from('tenants')
+            .select('kiosk_media')
+            .eq('id', req.tenantId)
+            .single();
+        const media = (Array.isArray(tenant?.kiosk_media) ? tenant.kiosk_media : []).filter((m) => m.url !== url);
+        const { data: updated, error } = await supabase.from('tenants')
+            .update({ kiosk_media: media, updated_at: new Date().toISOString() })
+            .eq('id', req.tenantId)
+            .select('kiosk_media')
+            .single();
+        if (error) throw error;
+        res.json({ kiosk_media: updated.kiosk_media });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============ COVER PRODUCTS ============
+
+router.get('/cover-products', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    try {
+        const { data, error } = await supabase.from('cover_products')
+            .select('*')
+            .eq('tenant_id', req.tenantId)
+            .order('sort_order')
+            .order('name');
+        if (error) throw error;
+        res.json(data || []);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.post('/cover-products', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    const { name, description, is_active, sort_order } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Nombre requerido' });
+    try {
+        const { data, error } = await supabase.from('cover_products').insert({
+            tenant_id: req.tenantId,
+            name: String(name).trim(),
+            description: description || null,
+            is_active: is_active !== false,
+            sort_order: Number.isInteger(sort_order) ? sort_order : 0,
+        }).select().single();
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.put('/cover-products/:id', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    const { name, description, is_active, sort_order } = req.body || {};
+    try {
+        const update = {};
+        if (name !== undefined) update.name = String(name).trim();
+        if (description !== undefined) update.description = description;
+        if (is_active !== undefined) update.is_active = !!is_active;
+        if (sort_order !== undefined) update.sort_order = parseInt(sort_order, 10) || 0;
+        const { data, error } = await supabase.from('cover_products')
+            .update(update)
+            .eq('id', req.params.id)
+            .eq('tenant_id', req.tenantId)
+            .select()
+            .single();
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.delete('/cover-products/:id', adminAuth, async (req, res) => {
+    const supabase = req.app.locals.supabase;
+    try {
+        const { error } = await supabase.from('cover_products')
+            .delete()
+            .eq('id', req.params.id)
+            .eq('tenant_id', req.tenantId);
+        if (error) throw error;
+        res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

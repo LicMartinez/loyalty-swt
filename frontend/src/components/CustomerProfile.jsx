@@ -70,7 +70,7 @@ const CustomerProfile = ({ customerId, onReset }) => {
             }));
             // Imprimir ticket
             if (res.data.ticket) {
-                printRedemptionTicket(res.data.ticket);
+                printRedemptionTicket(res.data.ticket, { target: 'bar' });
             }
             alert('¡Beneficio canjeado! Imprimiendo ticket...');
         } catch (error) {
@@ -100,7 +100,7 @@ const CustomerProfile = ({ customerId, onReset }) => {
             }));
             // Imprimir ticket
             if (res.data.ticket) {
-                printRedemptionTicket(res.data.ticket);
+                printRedemptionTicket(res.data.ticket, { target: 'bar' });
             }
             alert('¡Cortesía redimida! Imprimiendo ticket...');
         } catch (error) {

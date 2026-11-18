@@ -4,13 +4,18 @@ import CustomerProfile from './components/CustomerProfile';
 import PrinterConfig from './components/PrinterConfig';
 import KioskMode from './components/KioskMode';
 import StaffLogin from './components/StaffLogin';
-import { QrCode, Settings, LogOut, Monitor, ScanLine } from 'lucide-react';
+import CoverDispatch from './components/CoverDispatch';
+import { QrCode, Settings, LogOut, Monitor, ScanLine, Ticket } from 'lucide-react';
 import { useBarcodeScanner, extractCustomerId, isValidCustomerId } from './utils/useBarcodeScanner';
 
 function App() {
   const [scannedId, setScannedId] = useState(null);
   const [showPrinterConfig, setShowPrinterConfig] = useState(false);
   const [showKioskSettings, setShowKioskSettings] = useState(false);
+  const [showCover, setShowCover] = useState(false);
+  const [kioskCamera, setKioskCamera] = useState(
+    () => localStorage.getItem('kiosk_camera') || 'auto'
+  );
   const [kioskActive, setKioskActive] = useState(false);
   const [kioskTimeout, setKioskTimeout] = useState(
     () => parseInt(localStorage.getItem('kiosk_timeout') || '20', 10)
@@ -43,7 +48,13 @@ function App() {
 
   // Lector USB (HID) como método secundario en el flujo normal de staff.
   // Activo solo en la vista de escaneo (sin cliente seleccionado ni paneles abiertos).
-  const usbScanEnabled = !!token && !kioskActive && !scannedId && !showPrinterConfig && !showKioskSettings;
+  const usbScanEnabled = !!token && !kioskActive && !scannedId && !showPrinterConfig && !showKioskSettings && !showCover;
+
+  const closePanels = () => {
+    setShowPrinterConfig(false);
+    setShowKioskSettings(false);
+    setShowCover(false);
+  };
   useBarcodeScanner((code) => {
     const customerId = extractCustomerId(code);
     if (isValidCustomerId(customerId)) {
@@ -78,14 +89,21 @@ function App() {
         <p className="text-muted">Staff Portal</p>
         <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex', gap: 4 }}>
           <button
-            onClick={() => { setShowKioskSettings(!showKioskSettings); setShowPrinterConfig(false); }}
+            onClick={() => { closePanels(); setShowCover(!showCover); }}
+            style={{ background: 'transparent', padding: '8px', width: 'auto', color: 'var(--text-muted)' }}
+            title="Despachar cover"
+          >
+            <Ticket size={22} />
+          </button>
+          <button
+            onClick={() => { closePanels(); setShowKioskSettings(!showKioskSettings); }}
             style={{ background: 'transparent', padding: '8px', width: 'auto', color: 'var(--text-muted)' }}
             title="Modo Kiosco"
           >
             <Monitor size={22} />
           </button>
           <button
-            onClick={() => { setShowPrinterConfig(!showPrinterConfig); setShowKioskSettings(false); }}
+            onClick={() => { closePanels(); setShowPrinterConfig(!showPrinterConfig); }}
             style={{ background: 'transparent', padding: '8px', width: 'auto', color: 'var(--text-muted)' }}
             title="Configurar Impresora"
           >
@@ -110,6 +128,31 @@ function App() {
               Al escanear un QR, la visita se registra automáticamente.
             </p>
             
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
+                Cámara en kiosco
+              </label>
+              <p className="text-muted" style={{ fontSize: '0.85em', marginBottom: 8 }}>
+                En una PC sin cámara déjalo en automático o desactívalo para no mostrar “Request Camera Permissions”.
+              </p>
+              <select
+                value={kioskCamera}
+                onChange={(e) => {
+                  setKioskCamera(e.target.value);
+                  localStorage.setItem('kiosk_camera', e.target.value);
+                }}
+                style={{
+                  width: '100%', padding: '10px 12px', borderRadius: 8,
+                  border: '1px solid var(--glass-border)',
+                  background: 'var(--surface-color)', color: 'var(--text-main)'
+                }}
+              >
+                <option value="auto">Automático (ocultar si no hay cámara)</option>
+                <option value="off">Nunca usar cámara (solo lector USB)</option>
+                <option value="on">Forzar cámara</option>
+              </select>
+            </div>
+
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
                 Tiempo de espera (segundos)
@@ -154,6 +197,8 @@ function App() {
               Cancelar
             </button>
           </div>
+        ) : showCover ? (
+          <CoverDispatch onClose={() => setShowCover(false)} />
         ) : showPrinterConfig ? (
           <PrinterConfig onClose={() => setShowPrinterConfig(false)} />
         ) : !scannedId ? (

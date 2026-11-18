@@ -9,14 +9,57 @@
 // Configuración guardada en localStorage
 const PRINTER_CONFIG_KEY = 'printer_config';
 
+const DEFAULT_BRIDGE_URL = 'https://127.0.0.1:4001';
+
 export function getPrinterConfig() {
     const saved = localStorage.getItem(PRINTER_CONFIG_KEY);
-    return saved ? JSON.parse(saved) : {
-        method: 'browser', // 'browser' | 'serial' | 'network'
+    const defaults = {
+        method: 'network',
         networkIp: '',
         networkPort: 9100,
-        paperWidth: 80 // mm
+        paperWidth: 80,
+        printBridgeUrl: DEFAULT_BRIDGE_URL,
+        printers: [],
     };
+    if (!saved) return defaults;
+    try {
+        const parsed = JSON.parse(saved);
+        const printers = (parsed.printers || []).map((p) => ({
+            ...p,
+            role: p.role === 'cover' ? 'cover' : 'bar',
+        }));
+        return {
+            ...defaults,
+            ...parsed,
+            printers,
+            printBridgeUrl: parsed.printBridgeUrl || DEFAULT_BRIDGE_URL,
+        };
+    } catch {
+        return defaults;
+    }
+}
+
+function brandName(ticketData) {
+    return (
+        ticketData?.brandName ||
+        (typeof localStorage !== 'undefined' && localStorage.getItem('staff_tenant_name')) ||
+        'LOYALTY'
+    ).toUpperCase();
+}
+
+/**
+ * Barra: todas las impresoras que no son cover.
+ * Cover: una sola impresora marcada como exclusiva (la primera con role=cover).
+ */
+export function printersForTarget(config, target = 'bar') {
+    const printers = config.printers || [];
+    if (target === 'cover') {
+        const exclusive = printers.filter((p) => p.role === 'cover' && p.ip);
+        return exclusive.slice(0, 1);
+    }
+    const bar = printers.filter((p) => p.role !== 'cover' && p.ip);
+    if (bar.length) return bar;
+    return printers.filter((p) => p.ip);
 }
 
 export function savePrinterConfig(config) {
@@ -27,10 +70,12 @@ export function savePrinterConfig(config) {
  * Genera el HTML del ticket para impresión
  */
 function generateTicketHTML(ticketData) {
-    const { customerName, perkName, perkDescription, redeemedAt } = ticketData;
+    const { customerName, perkName, perkDescription, redeemedAt, ticketKind } = ticketData;
     const date = new Date(redeemedAt);
     const dateStr = date.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const timeStr = date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const isCover = ticketKind === 'cover';
+    const header = brandName(ticketData);
 
     return `
 <!DOCTYPE html>
@@ -93,15 +138,15 @@ function generateTicketHTML(ticketData) {
 </style>
 </head>
 <body>
-    <div class="header">PANEM</div>
+    <div class="header">${header}</div>
     <div class="separator"></div>
     <div class="datetime">
         Fecha: ${dateStr}<br>
         Hora: ${timeStr}
     </div>
-    <div class="label">TICKET VALE POR:</div>
-    <div class="product">${perkName || perkDescription || 'CORTESÍA'}</div>
-    <div class="customer">${customerName}</div>
+    <div class="label">${isCover ? 'BOLETO DE COVER' : 'TICKET VALE POR:'}</div>
+    <div class="product">${perkName || perkDescription || (isCover ? 'COVER' : 'CORTESÍA')}</div>
+    <div class="customer">${customerName || (isCover ? '1 ACCESO' : '')}</div>
     <div class="disclaimer">
         "Ticket valido para la redención del producto descrito en la leyenda, 
         no canjeable en ninguna otra fecha diferente a la impresa en el ticket"
@@ -114,10 +159,12 @@ function generateTicketHTML(ticketData) {
  * Genera comandos ESC/POS para impresoras térmicas
  */
 function generateESCPOS(ticketData) {
-    const { customerName, perkName, perkDescription, redeemedAt } = ticketData;
+    const { customerName, perkName, perkDescription, redeemedAt, ticketKind } = ticketData;
     const date = new Date(redeemedAt);
     const dateStr = date.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const timeStr = date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const isCover = ticketKind === 'cover';
+    const header = brandName(ticketData);
 
     const ESC = '\x1B';
     const GS = '\x1D';
@@ -125,7 +172,7 @@ function generateESCPOS(ticketData) {
         ESC + '@',                    // Initialize
         ESC + 'a' + '\x01',          // Center align
         GS + '!' + '\x11',           // Double height + width
-        'PANEM\n',
+        `${header}\n`,
         GS + '!' + '\x00',           // Normal size
         ESC + 'a' + '\x00',          // Left align
         '--------------------------------\n',
@@ -134,12 +181,12 @@ function generateESCPOS(ticketData) {
         '--------------------------------\n',
         ESC + 'a' + '\x01',          // Center
         ESC + 'E' + '\x01',          // Bold on
-        'TICKET VALE POR:\n\n',
+        isCover ? 'BOLETO DE COVER\n\n' : 'TICKET VALE POR:\n\n',
         GS + '!' + '\x11',           // Double size
-        `${(perkName || perkDescription || 'CORTESIA').toUpperCase()}\n\n`,
+        `${(perkName || perkDescription || (isCover ? 'COVER' : 'CORTESIA')).toUpperCase()}\n\n`,
         GS + '!' + '\x00',           // Normal
         ESC + 'E' + '\x01',          // Bold
-        `${customerName}\n`,
+        `${customerName || (isCover ? '1 ACCESO' : '')}\n`,
         ESC + 'E' + '\x00',          // Bold off
         '\n',
         '--------------------------------\n',
@@ -160,11 +207,19 @@ function generateESCPOS(ticketData) {
 /**
  * Imprime el ticket usando el método configurado
  */
-export async function printRedemptionTicket(ticketData, printerIndex) {
+export async function printRedemptionTicket(ticketData, printerIndexOrOpts) {
     const config = getPrinterConfig();
 
-    // En iOS/iPad, Web Serial no está disponible — forzar método browser
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+    let printerIndex;
+    let target = ticketData?.ticketKind === 'cover' ? 'cover' : 'bar';
+    if (typeof printerIndexOrOpts === 'number') {
+        printerIndex = printerIndexOrOpts;
+    } else if (printerIndexOrOpts && typeof printerIndexOrOpts === 'object') {
+        if (printerIndexOrOpts.target) target = printerIndexOrOpts.target;
+        if (printerIndexOrOpts.printerIndex !== undefined) printerIndex = printerIndexOrOpts.printerIndex;
+    }
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
     const method = (config.method === 'serial' && isIOS) ? 'browser' : config.method;
@@ -174,7 +229,7 @@ export async function printRedemptionTicket(ticketData, printerIndex) {
             await printViaSerial(ticketData);
             break;
         case 'network':
-            await printViaNetwork(ticketData, config, printerIndex);
+            await printViaNetwork(ticketData, config, printerIndex, target);
             break;
         case 'browser':
         default:
@@ -249,31 +304,42 @@ async function printViaSerial(ticketData) {
 /**
  * Impresión vía red (IP directa al puerto raw de la impresora)
  * Usa el Print Bridge local para enviar comandos TCP a las impresoras.
- * El Print Bridge corre en una PC dentro de la red del local (puerto 3001).
+ * El Print Bridge corre en una PC dentro de la red del local (HTTPS :4001).
  */
-async function printViaNetwork(ticketData, config, printerIndex) {
-    const printers = config.printers || [];
-    
+async function printViaNetwork(ticketData, config, printerIndex, target = 'bar') {
+    let printers = config.printers || [];
+
     if (printers.length === 0) {
         if (config.networkIp) {
-            printers.push({ ip: config.networkIp, port: config.networkPort || 9100 });
+            printers = [{ ip: config.networkIp, port: config.networkPort || 9100, role: 'bar' }];
         } else {
-            alert('No hay impresoras de red configuradas.');
+            alert('No hay impresoras de red configuradas. Agrega una por IP en Configurar Impresoras.');
             printViaBrowser(ticketData);
             return;
         }
     }
 
-    // Print Bridge URL — se configura en localStorage
-    const bridgeUrl = config.printBridgeUrl || localStorage.getItem('print_bridge_url') || '';
-    
+    const bridgeUrl = config.printBridgeUrl || localStorage.getItem('print_bridge_url') || DEFAULT_BRIDGE_URL;
+
     if (!bridgeUrl) {
-        alert('Configura la URL del Print Bridge (ej: http://192.168.0.248:3001) en la sección de impresoras.');
+        alert('Configura la URL del Print Bridge (ej: https://127.0.0.1:4001) en la sección de impresoras.');
         printViaBrowser(ticketData);
         return;
     }
 
-    const targetPrinters = printerIndex !== undefined ? [printers[printerIndex]] : printers;
+    let targetPrinters;
+    if (printerIndex !== undefined) {
+        targetPrinters = printers[printerIndex] ? [printers[printerIndex]] : [];
+    } else {
+        targetPrinters = printersForTarget({ printers }, target);
+    }
+
+    if (!targetPrinters.length) {
+        alert(target === 'cover'
+            ? 'No hay una impresora de cover. Márcala como “Cover (exclusiva)” en Configurar Impresoras.'
+            : 'No hay impresoras de barra configuradas.');
+        return;
+    }
     const escposData = generateESCPOS(ticketData);
 
     const results = await Promise.allSettled(

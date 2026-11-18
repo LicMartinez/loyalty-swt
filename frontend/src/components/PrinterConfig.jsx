@@ -27,7 +27,12 @@ const PrinterConfig = ({ onClose }) => {
     };
 
     const addPrinter = () => {
-        const printers = [...(config.printers || []), { name: `Impresora ${(config.printers || []).length + 1}`, ip: '', port: 9100 }];
+        const printers = [...(config.printers || []), {
+            name: `Impresora ${(config.printers || []).length + 1}`,
+            ip: '',
+            port: 9100,
+            role: 'bar',
+        }];
         setConfig({ ...config, printers });
     };
 
@@ -104,25 +109,31 @@ const PrinterConfig = ({ onClose }) => {
             {config.method === 'network' && (
                 <div style={{ marginBottom: '16px' }}>
                     <div style={{ marginBottom: '12px' }}>
-                        <label className="text-muted" style={{ display: 'block', marginBottom: '6px', fontSize: '0.8rem' }}>Print Bridge (PC del local)</label>
+                        <label className="text-muted" style={{ display: 'block', marginBottom: '6px', fontSize: '0.8rem' }}>Print Bridge (esta PC o la del local)</label>
                         <input
                             type="text"
                             value={config.printBridgeUrl || ''}
                             onChange={e => setConfig({ ...config, printBridgeUrl: e.target.value })}
-                            placeholder="http://192.168.0.248:3001"
+                            placeholder="https://127.0.0.1:4001"
                             style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'var(--surface-color)', color: 'var(--text-main)', fontSize: '0.9rem' }}
                         />
-                        <span className="text-muted" style={{ fontSize: '0.7rem' }}>IP de la PC que corre el Print Bridge (node print-bridge/index.js)</span>
+                        <span className="text-muted" style={{ fontSize: '0.7rem' }}>
+                            En esta PC usa <code>https://127.0.0.1:4001</code> (Print Bridge). El navegador no puede hablar TCP directo a la impresora.
+                        </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <label className="text-muted" style={{ fontSize: '0.85rem' }}>Impresoras de red</label>
+                        <label className="text-muted" style={{ fontSize: '0.85rem' }}>Impresoras IP</label>
                         <button
                             onClick={addPrinter}
                             style={{ background: 'transparent', border: '1px solid var(--primary)', color: 'var(--primary)', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 4, width: 'auto' }}
                         >
-                            <Plus size={14} /> Agregar
+                            <Plus size={14} /> Agregar por IP
                         </button>
                     </div>
+                    <p className="text-muted" style={{ fontSize: '0.75rem', marginBottom: 10 }}>
+                        <strong>Barra:</strong> tragos y canjes — se imprimen en todas las de barra.{' '}
+                        <strong>Cover:</strong> boletos de acceso — 1 sola impresión en esa impresora.
+                    </p>
 
                     {(config.printers || []).length === 0 && (
                         <p className="text-muted" style={{ fontSize: '0.8rem', textAlign: 'center', padding: '16px' }}>
@@ -148,20 +159,28 @@ const PrinterConfig = ({ onClose }) => {
                                     <Trash2 size={16} />
                                 </button>
                             </div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                 <input
                                     type="text"
                                     value={printer.ip}
                                     onChange={e => updatePrinter(index, 'ip', e.target.value)}
                                     placeholder="192.168.0.100"
-                                    style={{ flex: 2, padding: '8px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'var(--bg-color)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+                                    style={{ flex: 2, minWidth: 120, padding: '8px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'var(--bg-color)', color: 'var(--text-main)', fontSize: '0.85rem' }}
                                 />
                                 <input
                                     type="number"
                                     value={printer.port}
                                     onChange={e => updatePrinter(index, 'port', parseInt(e.target.value) || 9100)}
-                                    style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'var(--bg-color)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+                                    style={{ width: 80, padding: '8px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'var(--bg-color)', color: 'var(--text-main)', fontSize: '0.85rem' }}
                                 />
+                                <select
+                                    value={printer.role || 'bar'}
+                                    onChange={e => updatePrinter(index, 'role', e.target.value)}
+                                    style={{ flex: 1, minWidth: 140, padding: '8px', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'var(--bg-color)', color: 'var(--text-main)', fontSize: '0.85rem' }}
+                                >
+                                    <option value="bar">Barra (todas)</option>
+                                    <option value="cover">Cover (exclusiva)</option>
+                                </select>
                                 <button
                                     onClick={() => handleTestPrint(index)}
                                     style={{ background: 'transparent', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', color: 'var(--text-main)', width: 'auto' }}

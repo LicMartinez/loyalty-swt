@@ -11,6 +11,7 @@ import Config from './pages/Config'
 import Reports from './pages/Reports'
 import TierConfig from './pages/TierConfig'
 import Printers from './pages/Printers'
+import KioskSetup from './pages/KioskSetup'
 import SuperAdmin from './pages/SuperAdmin'
 import SuperAdminUsers from './pages/SuperAdminUsers'
 
@@ -73,6 +74,7 @@ function App() {
         <Route path="/promotions" element={<Promotions />} />
         <Route path="/tiers" element={<TierConfig />} />
         <Route path="/printers" element={<Printers />} />
+        <Route path="/kiosk" element={<KioskSetup />} />
         <Route path="/config" element={<Config />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="*" element={<Navigate to="/" />} />

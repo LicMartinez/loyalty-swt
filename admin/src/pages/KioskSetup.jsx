@@ -85,9 +85,13 @@ const KioskSetup = () => {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Kiosco y cover</h1>
+        <h1 className="page-title">Kiosco / Marketing</h1>
         {saved && <span className="badge badge-success">Guardado ✓</span>}
       </div>
+      <p className="text-muted" style={{ marginBottom: 20, maxWidth: 720 }}>
+        Aquí se suben las fotos y videos que rotan en el kiosco del portal staff.
+        El staff no carga archivos: solo activa el modo kiosco. Los boletos de cover también se definen en esta pantalla.
+      </p>
       {error && <p className="field-error" style={{ marginBottom: 16 }}>{error}</p>}
 
       <div className="card">
@@ -149,7 +153,7 @@ const KioskSetup = () => {
         <div className="card-header">
           <h3 className="card-title">
             <Monitor size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-            Branding del kiosco (loop)
+            Marketing del kiosco (fotos y videos)
           </h3>
         </div>
         <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: 16 }}>

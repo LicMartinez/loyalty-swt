@@ -128,6 +128,20 @@ function App() {
               Al escanear un QR, la visita se registra automáticamente.
             </p>
             
+            <div style={{
+              marginBottom: 20, padding: 14, borderRadius: 10,
+              border: '1px solid var(--glass-border)', background: 'var(--surface-color)'
+            }}>
+              <label style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}>
+                Fotos y videos de marketing
+              </label>
+              <p className="text-muted" style={{ fontSize: '0.85em', marginBottom: 0, lineHeight: 1.45 }}>
+                El loop de espera del kiosco se configura en el <strong>portal Admin</strong>,
+                menú <strong>Kiosco / Marketing</strong> — no aquí. Sube PNG/JPEG/WebP o MP4/WebM
+                en <a href="https://loyalty-admin-jet.vercel.app/kiosk" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>loyalty-admin-jet.vercel.app/kiosk</a>.
+              </p>
+            </div>
+
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
                 Cámara en kiosco

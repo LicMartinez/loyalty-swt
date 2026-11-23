@@ -66,6 +66,39 @@ async function main() {
             return;
         }
 
+        if (req.method === 'POST' && req.url === '/probe') {
+            let body = '';
+            req.on('data', c => { body += c; });
+            req.on('end', async () => {
+                try {
+                    const { ip, port } = JSON.parse(body || '{}');
+                    if (!ip) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'IP requerida' }));
+                        return;
+                    }
+                    await new Promise((resolve, reject) => {
+                        const client = new net.Socket();
+                        client.setTimeout(4000);
+                        client.connect(port || 9100, ip, () => {
+                            client.end();
+                            resolve();
+                        });
+                        client.on('error', err => { client.destroy(); reject(err); });
+                        client.on('timeout', () => { client.destroy(); reject(new Error('Timeout al conectar con la impresora')); });
+                    });
+                    console.log(`[PROBE OK] ${ip}:${port || 9100}`);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: true, ip, port: port || 9100 }));
+                } catch (err) {
+                    console.error(`[PROBE ERR] ${err.message}`);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: err.message || 'No se pudo abrir TCP hacia la impresora' }));
+                }
+            });
+            return;
+        }
+
         if (req.method === 'POST' && req.url === '/print') {
             let body = '';
             req.on('data', c => { body += c; });

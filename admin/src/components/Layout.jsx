@@ -10,7 +10,7 @@ const navItems = [
   { to: '/reports', icon: BarChart3, label: 'Reportes' },
   { to: '/tiers', icon: Layers, label: 'Niveles' },
   { to: '/printers', icon: Printer, label: 'Impresoras' },
-  { to: '/kiosk', icon: Monitor, label: 'Kiosco / Cover' },
+  { to: '/kiosk', icon: Monitor, label: 'Kiosco / Marketing' },
   { to: '/config', icon: Settings, label: 'Configuración' },
 ]
 

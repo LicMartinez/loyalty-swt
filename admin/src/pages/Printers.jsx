@@ -100,6 +100,18 @@ const Printers = () => {
         </button>
       </div>
 
+      <div className="card" style={{ marginBottom: 16, borderColor: 'var(--primary)' }}>
+        <p style={{ margin: 0, lineHeight: 1.5 }}>
+          Este catálogo vive en la nube. Desde Vercel <strong>no se alcanza</strong> una impresora de la LAN
+          (por ejemplo COVER en <code>192.168.0.10:9100</code>). Para imprimir de verdad en Windows:
+        </p>
+        <ul style={{ margin: '10px 0 0', paddingLeft: 20, lineHeight: 1.5 }}>
+          <li>Configura las IPs en el <strong>portal Staff</strong> → Configurar impresoras (se guarda en esta PC).</li>
+          <li>Deja corriendo Print Bridge en la misma PC (<code>print-bridge</code>, puerto 4001) y acepta el certificado.</li>
+          <li>O usa el método <strong>Navegador / Windows</strong> y elige la impresora COVER ya instalada.</li>
+        </ul>
+      </div>
+
       <div className="card">
         <div className="table-container">
           <table>

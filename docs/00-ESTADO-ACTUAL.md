@@ -1,7 +1,7 @@
 # SW Loyalty — Estado Actual del Proyecto (As-Built)
 
 > **Mapa corto.** El documento final (funcionamiento + dónde cambiar código) es **`SYSTEM_DOCUMENTATION.md`** en la raíz del repo.  
-> Última actualización: 2026-11-17  
+> Última actualización: 2026-11-23  
 > Estado: **plataforma multi-tenant operativa** (Vite + Express + Supabase), no el MVP single-tenant ni el plan Next.js de docs antiguas.
 
 ---

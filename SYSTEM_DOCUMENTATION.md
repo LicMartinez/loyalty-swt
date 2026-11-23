@@ -303,10 +303,10 @@ Header staff → icono monitor → timeout 5–120 s (default 20, `localStorage.
 - Resultado: bienvenida, puntos, visitas, nivel, ciclo, cortesías/perks
 - **Countdown de inactividad:** cada interacción **reinicia** el contador al timeout completo (no lo pausa)
 - USB HID = **método principal** en kiosco; cámara solo si hay dispositivo (o preferencia `kiosk_camera`)
-- Pantalla de espera: loop de fotos/videos (`tenants.kiosk_media`) a pantalla completa
+- Pantalla de espera: loop de fotos/videos (`tenants.kiosk_media`) a pantalla completa. **Se suben en Admin → Kiosco / Marketing**, no en staff.
+- Salir del kiosco: botón fijo (z-index alto) o tecla **Escape**
 - `processingRef` evita doble check-in
 - Error: mensaje 5 s y vuelve al escáner
-- Salir: botón discreto
 
 ### Escaneo QR
 
@@ -323,9 +323,9 @@ Config local en `PrinterConfig` (no es el CRUD de Admin → Impresoras).
 
 | Método | Uso |
 |--------|-----|
-| Browser | `window.print()` — iOS/iPad |
+| Browser | `window.print()` — iOS/iPad **o Windows** (elige COVER en el diálogo del sistema) |
 | Serial | Web Serial USB ESC/POS — Chrome desktop |
-| Network | HTTPS al **Print Bridge** `:4001` (en la misma PC: `https://127.0.0.1:4001`) → TCP :9100 |
+| Network | HTTPS al **Print Bridge** `:4001` (en la misma PC: `https://127.0.0.1:4001`) → TCP :9100. El certificado self-signed hay que aceptarlo una vez. |
 
 Cada impresora IP tiene rol:
 
@@ -410,6 +410,7 @@ Proceso **en la PC del local**, no en Vercel. El iPad llama HTTPS `:4001`; el br
 | Método | Ruta | Body |
 |--------|------|------|
 | GET | `/` | Health `{ status, port }` |
+| POST | `/probe` | `{ ip, port }` — abre TCP y cierra, sin imprimir |
 | POST | `/print` | `{ ip, port, data }` ESC/POS |
 
 Puerto: `PRINT_BRIDGE_PORT` (default **4001**). Certificado self-signed en `print-bridge/.certs/`.  

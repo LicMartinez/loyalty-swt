@@ -66,6 +66,55 @@ export function savePrinterConfig(config) {
     localStorage.setItem(PRINTER_CONFIG_KEY, JSON.stringify(config));
 }
 
+export function bridgeBaseUrl(config) {
+    return (config?.printBridgeUrl || localStorage.getItem('print_bridge_url') || DEFAULT_BRIDGE_URL).replace(/\/$/, '');
+}
+
+/**
+ * Comprueba si Print Bridge responde en esta PC (HTTPS :4001).
+ * Si falla, casi siempre es: el proceso no está corriendo o el certificado self-signed no se aceptó.
+ */
+export async function checkPrintBridge(config) {
+    const url = bridgeBaseUrl(config);
+    try {
+        const res = await fetch(`${url}/`, { method: 'GET' });
+        if (!res.ok) {
+            return { ok: false, url, error: `Print Bridge respondió HTTP ${res.status}` };
+        }
+        const data = await res.json().catch(() => ({}));
+        return { ok: true, url, data };
+    } catch {
+        return {
+            ok: false,
+            url,
+            error: `No se pudo conectar a ${url}. Arranca Print Bridge en esta PC y abre esa URL para aceptar el certificado.`,
+        };
+    }
+}
+
+/** Intenta abrir un TCP a la impresora vía Print Bridge, sin imprimir. */
+export async function probePrinter(config, printer) {
+    const url = bridgeBaseUrl(config);
+    if (!printer?.ip) return { ok: false, error: 'Falta la IP de la impresora' };
+    try {
+        const res = await fetch(`${url}/probe`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: printer.ip, port: printer.port || 9100 }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            return { ok: false, error: body.error || `No hay ruta TCP a ${printer.ip}:${printer.port || 9100}` };
+        }
+        return { ok: true };
+    } catch {
+        return {
+            ok: false,
+            error: `Print Bridge no responde en ${url}. Ábrelo en el navegador y acepta el certificado.`,
+        };
+    }
+}
+
 /**
  * Genera el HTML del ticket para impresión
  */
@@ -207,8 +256,8 @@ function generateESCPOS(ticketData) {
 /**
  * Imprime el ticket usando el método configurado
  */
-export async function printRedemptionTicket(ticketData, printerIndexOrOpts) {
-    const config = getPrinterConfig();
+export async function printRedemptionTicket(ticketData, printerIndexOrOpts, configOverride) {
+    const config = configOverride || getPrinterConfig();
 
     let printerIndex;
     let target = ticketData?.ticketKind === 'cover' ? 'cover' : 'bar';
@@ -344,16 +393,23 @@ async function printViaNetwork(ticketData, config, printerIndex, target = 'bar')
 
     const results = await Promise.allSettled(
         targetPrinters.map(async (printer) => {
-            if (!printer || !printer.ip) return;
-            const response = await fetch(`${bridgeUrl.replace(/\/$/, '')}/print`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ip: printer.ip,
-                    port: printer.port || 9100,
-                    data: escposData
-                })
-            });
+            if (!printer || !printer.ip) throw new Error('La impresora no tiene IP');
+            let response;
+            try {
+                response = await fetch(`${bridgeUrl.replace(/\/$/, '')}/print`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ip: printer.ip,
+                        port: printer.port || 9100,
+                        data: escposData
+                    })
+                });
+            } catch {
+                throw new Error(
+                    `Print Bridge no responde en ${bridgeUrl}. En esta PC: cd print-bridge && node index.js, luego abre ${bridgeUrl} y acepta el certificado.`
+                );
+            }
             if (!response.ok) {
                 const err = await response.json().catch(() => ({}));
                 throw new Error(err.error || `Error imprimiendo en ${printer.name || printer.ip}`);
@@ -364,8 +420,11 @@ async function printViaNetwork(ticketData, config, printerIndex, target = 'bar')
     const failures = results.filter(r => r.status === 'rejected');
     if (failures.length > 0 && failures.length === targetPrinters.length) {
         console.error('Todas las impresoras de red fallaron:', failures);
-        alert('Error en todas las impresoras de red. Usando impresión del navegador como respaldo.');
-        printViaBrowser(ticketData);
+        const reason = failures[0]?.reason?.message || 'Print Bridge no alcanzó la impresora';
+        const useBrowser = confirm(
+            `${reason}\n\n¿Imprimir con el diálogo de Windows? Elige la impresora COVER (u otra instalada) en el diálogo.`
+        );
+        if (useBrowser) printViaBrowser(ticketData);
     } else if (failures.length > 0) {
         console.warn('Algunas impresoras fallaron:', failures);
     }

@@ -52,6 +52,12 @@ const KioskMode = ({ timeout = 20, onExit }) => {
 
     const tenantSlug = localStorage.getItem('staff_slug') || '';
 
+    const handleExit = useCallback((e) => {
+        e?.preventDefault?.();
+        e?.stopPropagation?.();
+        onExit?.();
+    }, [onExit]);
+
     useEffect(() => {
         shouldUseCamera().then(setUseCamera);
         if (!tenantSlug) return;
@@ -59,6 +65,16 @@ const KioskMode = ({ timeout = 20, onExit }) => {
             .then((res) => setBranding(res.data || { kiosk_media: [] }))
             .catch(() => {});
     }, [tenantSlug]);
+
+    useEffect(() => {
+        const onKey = (e) => {
+            if (e.key !== 'Escape') return;
+            e.preventDefault();
+            onExit?.();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onExit]);
 
     // Mantener phaseRef sincronizado para usarlo dentro de callbacks estables
     useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -246,9 +262,10 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                     )}
                 </div>
                 <button
+                    type="button"
                     className="kiosk-exit-btn"
-                    onClick={onExit}
-                    style={{ position: 'fixed', bottom: 20, right: 20, width: 'auto', padding: '8px 16px', fontSize: '12px', opacity: 0.5, background: 'var(--surface-color)' }}
+                    onClick={handleExit}
+                    style={{ width: 'auto', padding: '10px 18px', fontSize: '13px', background: 'var(--surface-color)' }}
                 >
                     Salir del modo kiosco
                 </button>
@@ -261,6 +278,14 @@ const KioskMode = ({ timeout = 20, onExit }) => {
             <div className="kiosk-container kiosk-center">
                 <Loader2 size={64} className="animate-spin" color="var(--primary)" />
                 <h2 style={{ marginTop: 24 }}>Registrando visita...</h2>
+                <button
+                    type="button"
+                    className="kiosk-exit-btn"
+                    onClick={handleExit}
+                    style={{ width: 'auto', padding: '10px 18px', fontSize: '13px', background: 'var(--surface-color)' }}
+                >
+                    Salir del modo kiosco
+                </button>
             </div>
         );
     }
@@ -271,6 +296,14 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 <AlertTriangle size={64} color="var(--danger)" />
                 <h2 style={{ marginTop: 24, color: 'var(--danger)' }}>{errorMsg}</h2>
                 <p className="text-muted" style={{ marginTop: 12 }}>Regresando al escáner...</p>
+                <button
+                    type="button"
+                    className="kiosk-exit-btn"
+                    onClick={handleExit}
+                    style={{ width: 'auto', padding: '10px 18px', fontSize: '13px', background: 'var(--surface-color)' }}
+                >
+                    Salir del modo kiosco
+                </button>
             </div>
         );
     }
@@ -403,6 +436,14 @@ const KioskMode = ({ timeout = 20, onExit }) => {
                 onClick={resetToScanner}
             >
                 Volver al escáner
+            </button>
+            <button
+                type="button"
+                className="kiosk-exit-btn"
+                onClick={handleExit}
+                style={{ width: 'auto', padding: '10px 18px', fontSize: '13px', background: 'var(--surface-color)' }}
+            >
+                Salir del modo kiosco
             </button>
         </div>
     );

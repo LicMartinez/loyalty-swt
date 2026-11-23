@@ -133,6 +133,11 @@ button {
   justify-content: flex-end;
 }
 
+.kiosk-branding,
+.kiosk-branding * {
+  pointer-events: none;
+}
+
 .kiosk-branding {
   position: absolute;
   inset: 0;
@@ -362,8 +367,13 @@ button {
 }
 
 .kiosk-exit-btn {
-  opacity: 0.4;
+  position: fixed !important;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2000;
+  opacity: 0.85;
   transition: opacity 0.2s;
+  pointer-events: auto;
 }
 
 .kiosk-exit-btn:hover {
